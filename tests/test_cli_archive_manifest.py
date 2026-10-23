@@ -158,3 +158,49 @@ def test_funding_rate_import_records_verified_manifest_after_save(
         assert manifest[0]["size_bytes"] == len(ARCHIVE_BYTES)
         assert manifest[0]["row_count"] == 1
         assert manifest[0]["imported_at"]
+
+
+
+class FakeTradeArchive(FakeArchive):
+    def list_monthly_trade_archives(
+        self, symbol: str, start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> list[str]:
+        return [
+            "https://data.binance.vision/data/spot/monthly/trades/"
+            "BTCUSDT/BTCUSDT-trades-2024-01.zip"
+        ]
+
+    def fetch_trade_archive(self, url: str) -> list[DataRecord]:
+        if self.should_fail:
+            raise ValueError("checksum mismatch")
+        self.last_verified_checksum_sha256 = hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+        self.last_verified_size_bytes = len(ARCHIVE_BYTES)
+        return [
+            DataRecord(
+                "binance", "spot", "trades", "BTCUSDT", 1704067200000,
+                "1001", {"price": "2", "archive_url": url},
+            )
+        ]
+
+
+def test_trade_import_records_verified_manifest_after_save(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceSpotAdapter", FakeSource)
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeTradeArchive)
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        result = cli._backfill_archive_trade_dataset(
+            store, "spot", ["BTCUSDT"], "2024-01", "2024-01", "trades"
+        )
+        assert result == 0
+        manifest = store.archive_manifest_summary(
+            exchange_id="binance", market_type="spot", data_type="trades",
+            symbol="BTCUSDT",
+        )
+        assert len(manifest) == 1
+        assert manifest[0]["status"] == "imported"
+        assert manifest[0]["checksum_sha256"] == hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+        assert manifest[0]["size_bytes"] == len(ARCHIVE_BYTES)
+        assert manifest[0]["row_count"] == 1
+        assert manifest[0]["imported_at"]
