@@ -48,14 +48,39 @@ class SQLiteStore:
         self._connection.close()
 
     def save_symbols(self, symbols: list[dict[str, Any]]) -> None:
+        """Refresh current metadata while retaining symbols absent from the latest discovery."""
+        if not symbols:
+            raise ValueError("Refusing to replace symbol metadata with an empty discovery result")
+        identities = {(str(s["exchange_id"]), str(s["market_type"])) for s in symbols}
+        if len(identities) != 1:
+            raise ValueError("A symbol discovery batch must contain exactly one exchange and market")
+        exchange_id, market_type = next(iter(identities))
+        incoming_names = {str(s["symbol"]) for s in symbols}
         with self._connection:
+            existing = self._connection.execute(
+                """SELECT symbol, metadata_json FROM symbols
+                   WHERE exchange_id=? AND market_type=?""",
+                (exchange_id, market_type),
+            ).fetchall()
+            for symbol, metadata_json in existing:
+                if symbol not in incoming_names:
+                    metadata = json.loads(metadata_json)
+                    metadata["status"] = "NOT_PRESENT_IN_LATEST_DISCOVERY"
+                    metadata["is_currently_listed"] = False
+                    self._connection.execute(
+                        """UPDATE symbols SET metadata_json=?, discovered_at=CURRENT_TIMESTAMP
+                           WHERE exchange_id=? AND market_type=? AND symbol=?""",
+                        (json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                         exchange_id, market_type, symbol),
+                    )
             self._connection.executemany(
                 """INSERT INTO symbols(exchange_id, market_type, symbol, metadata_json)
                    VALUES (?, ?, ?, ?) ON CONFLICT(exchange_id, market_type, symbol)
                    DO UPDATE SET metadata_json=excluded.metadata_json,
                                  discovered_at=CURRENT_TIMESTAMP""",
                 [(s["exchange_id"], s["market_type"], s["symbol"],
-                  json.dumps(s, ensure_ascii=False, sort_keys=True)) for s in symbols],
+                  json.dumps({**s, "is_currently_listed": True},
+                             ensure_ascii=False, sort_keys=True)) for s in symbols],
             )
 
     def get_symbols(self, exchange_id: str, market_type: str) -> list[dict[str, Any]]:
@@ -116,12 +141,15 @@ class SQLiteStore:
             )
 
     def dataset_summary(self) -> list[dict[str, Any]]:
+        """Include attempted datasets even when their first request yielded no records."""
         rows = self._connection.execute(
-            """SELECT r.exchange_id, r.market_type, r.data_type, r.symbol, COUNT(*),
-               MIN(r.timestamp_ms), MAX(r.timestamp_ms), c.status, c.detail
-               FROM records r LEFT JOIN checkpoints c USING(exchange_id, market_type, data_type, symbol)
-               GROUP BY r.exchange_id, r.market_type, r.data_type, r.symbol, c.status, c.detail
-               ORDER BY r.exchange_id, r.market_type, r.data_type, r.symbol"""
+            """SELECT c.exchange_id, c.market_type, c.data_type, c.symbol,
+                      COUNT(r.record_key), MIN(r.timestamp_ms), MAX(r.timestamp_ms),
+                      c.status, c.detail
+               FROM checkpoints c
+               LEFT JOIN records r USING(exchange_id, market_type, data_type, symbol)
+               GROUP BY c.exchange_id, c.market_type, c.data_type, c.symbol, c.status, c.detail
+               ORDER BY c.exchange_id, c.market_type, c.data_type, c.symbol"""
         ).fetchall()
         keys = ("exchange_id", "market_type", "data_type", "symbol", "rows",
                 "first_timestamp_ms", "last_timestamp_ms", "status", "detail")

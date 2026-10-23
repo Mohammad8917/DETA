@@ -69,7 +69,9 @@ class BinanceSpotAdapter:
         """Yield one API page at a time so historical backfills have bounded memory use."""
         if interval not in self.candle_intervals:
             raise ValueError(f"Unsupported Binance kline interval: {interval}")
-        cursor = max(0, start_ms)
+        if start_ms < 0 or (end_ms is not None and end_ms < start_ms):
+            raise ValueError("Invalid kline time range")
+        cursor = start_ms
         while True:
             params: dict[str, Any] = {"symbol": symbol, "interval": interval,
                                       "startTime": cursor, "limit": 1000}
@@ -81,6 +83,8 @@ class BinanceSpotAdapter:
             records: list[DataRecord] = []
             for row in rows:
                 open_time = int(row[0])
+                if end_ms is not None and open_time > end_ms:
+                    continue
                 payload = {"interval": interval, "open_time_ms": open_time,
                     "open": row[1], "high": row[2], "low": row[3], "close": row[4],
                     "volume": row[5], "close_time_ms": int(row[6]), "quote_volume": row[7],
@@ -88,57 +92,66 @@ class BinanceSpotAdapter:
                     "taker_buy_quote_volume": row[10], "source": "binance_rest_native"}
                 records.append(DataRecord(self.exchange_id, self.market_type,
                     f"klines_{interval}", symbol, open_time, str(open_time), payload))
-            if not records:
-                return
-            yield records
+            if records:
+                yield records
             next_cursor = int(rows[-1][0]) + 1
-            if next_cursor <= cursor or len(rows) < 1000:
+            if (end_ms is not None and next_cursor > end_ms) or next_cursor <= cursor or len(rows) < 1000:
                 return
             cursor = next_cursor
-            if end_ms is not None and cursor > end_ms:
-                return
 
-    def fetch_klines(self, symbol: str, interval: str, start_ms: int,
-                     end_ms: int | None = None) -> list[DataRecord]:
-        """Convenience method for small tests; production backfills should use iter_klines."""
-        return [record for page in self.iter_klines(symbol, interval, start_ms, end_ms)
-                for record in page]
+    def iter_aggregate_trades(
+        self, symbol: str, start_ms: int = 0, end_ms: int | None = None,
+        start_id: int | None = None,
+    ) -> Iterator[list[DataRecord]]:
+        """Stream aggregate trades page-by-page, resuming by aggregate trade ID when available."""
+        if start_ms < 0 or (end_ms is not None and end_ms < start_ms):
+            raise ValueError("Invalid aggregate-trade time range")
+        if start_id is not None and start_id < 0:
+            raise ValueError("Aggregate trade ID must be non-negative")
+        cursor_id = start_id
+        while True:
+            params: dict[str, Any] = {"symbol": symbol, "limit": 1000}
+            if cursor_id is None:
+                params["startTime"] = start_ms
+            else:
+                params["fromId"] = cursor_id
+            rows = self._get("/api/v3/aggTrades", params)
+            if not rows:
+                return
+            records: list[DataRecord] = []
+            stop_after_page = False
+            for row in rows:
+                trade_id = int(row["a"])
+                timestamp = int(row["T"])
+                if end_ms is not None and timestamp > end_ms:
+                    stop_after_page = True
+                    break
+                if timestamp < start_ms:
+                    continue
+                payload = {
+                    "aggregate_trade_id": trade_id, "price": row["p"],
+                    "quantity": row["q"], "first_trade_id": int(row["f"]),
+                    "last_trade_id": int(row["l"]), "timestamp_ms": timestamp,
+                    "is_buyer_maker": bool(row["m"]),
+                    "is_best_match": bool(row.get("M", False)),
+                    "source": "binance_rest_native",
+                }
+                records.append(DataRecord(self.exchange_id, self.market_type, "agg_trades",
+                    symbol, timestamp, str(trade_id), payload))
+            if records:
+                yield records
+            if stop_after_page or len(rows) < 1000:
+                return
+            next_cursor = int(rows[-1]["a"]) + 1
+            if cursor_id is not None and next_cursor <= cursor_id:
+                raise RuntimeError(f"Non-advancing aggregate trade cursor for {symbol}")
+            cursor_id = next_cursor
 
     def fetch_aggregate_trades(self, symbol: str, start_ms: int = 0,
                                end_ms: int | None = None) -> list[DataRecord]:
-        """Fetch aggregate trades by ID; currently materializes results and is for bounded jobs."""
-        cursor = max(0, start_ms)
-        records: list[DataRecord] = []
-        while True:
-            params: dict[str, Any] = {"symbol": symbol, "limit": 1000}
-            if cursor > 0:
-                params["fromId"] = cursor
-            rows = self._get("/api/v3/aggTrades", params)
-            if not rows:
-                break
-            stop = False
-            for row in rows:
-                timestamp = int(row["T"])
-                if timestamp < start_ms:
-                    continue
-                if end_ms is not None and timestamp > end_ms:
-                    stop = True
-                    break
-                trade_id = int(row["a"])
-                payload = {"aggregate_trade_id": trade_id, "price": row["p"],
-                    "quantity": row["q"], "first_trade_id": int(row["f"]),
-                    "last_trade_id": int(row["l"]), "timestamp_ms": timestamp,
-                    "is_buyer_maker": bool(row["m"]), "is_best_match": bool(row.get("M", False)),
-                    "source": "binance_rest_native"}
-                records.append(DataRecord(self.exchange_id, self.market_type, "agg_trades",
-                    symbol, timestamp, str(trade_id), payload))
-            if stop or len(rows) < 1000:
-                break
-            next_cursor = int(rows[-1]["a"]) + 1
-            if next_cursor <= cursor:
-                raise RuntimeError(f"Non-advancing aggregate trade cursor for {symbol}")
-            cursor = next_cursor
-        return records
+        """Convenience method for small tests; production backfills should use the iterator."""
+        return [record for page in self.iter_aggregate_trades(symbol, start_ms, end_ms)
+                for record in page]
 
     def fetch_24h_tickers(self) -> list[dict[str, Any]]:
         """Return a point-in-time public ticker snapshot; this is not historical data."""
