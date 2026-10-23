@@ -139,6 +139,102 @@ class BinanceArchiveAdapter:
         except ValueError as exc:
             raise ValueError(f"Invalid month: {value}") from exc
 
+    def list_monthly_agg_trade_archives(
+        self, symbol: str, start_month: str | None = None, end_month: str | None = None,
+    ) -> list[str]:
+        """Return official monthly aggregate-trade ZIP archives listed for one symbol."""
+        if not symbol or "/" in symbol or "\\" in symbol:
+            raise ValueError("Invalid symbol for archive path")
+        start = self._parse_month(start_month) if start_month else None
+        end = self._parse_month(end_month) if end_month else None
+        if start and end and start > end:
+            raise ValueError("start_month must not be later than end_month")
+        directory = (
+            f"{self.base_url}/data/{self.archive_market_path}/monthly/aggTrades/{symbol}/"
+        )
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code == 404:
+            return []
+        parser = _Links()
+        parser.feed(response.text)
+        pattern = re.compile(
+            rf"^{re.escape(symbol)}-aggTrades-(\\d{{4}}-\\d{{2}})\\.zip$"
+        )
+        found: list[tuple[date, str]] = []
+        for href in parser.hrefs:
+            name = href.rstrip("/").rsplit("/", 1)[-1]
+            match = pattern.fullmatch(name)
+            if not match:
+                continue
+            month = self._parse_month(match.group(1))
+            if start and month < start:
+                continue
+            if end and month > end:
+                continue
+            found.append((month, urljoin(directory, href)))
+        return [url for _, url in sorted(set(found), key=lambda item: item[0])]
+
+    def fetch_agg_trade_archive(self, url: str) -> list[DataRecord]:
+        """Download and normalize one official monthly aggregate-trade ZIP archive."""
+        response = self._get(url)
+        symbol = self._agg_trade_archive_symbol(url)
+        try:
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+                if len(csv_names) != 1:
+                    raise ValueError(
+                        f"Expected exactly one CSV in archive {url}, found {len(csv_names)}"
+                    )
+                with archive.open(csv_names[0]) as binary:
+                    text_stream = io.TextIOWrapper(binary, encoding="utf-8-sig", newline="")
+                    reader = csv.reader(text_stream)
+                    records: list[DataRecord] = []
+                    for row in reader:
+                        if not row:
+                            continue
+                        if row[0].strip().lower() in {"agg_trade_id", "aggregate_trade_id"}:
+                            continue
+                        if len(row) < 7:
+                            raise ValueError(
+                                f"Malformed aggregate-trade row in {url}: expected at least 7 columns"
+                            )
+                        try:
+                            trade_id = int(row[0])
+                            first_trade_id = int(row[3])
+                            last_trade_id = int(row[4])
+                            timestamp = int(row[5])
+                        except ValueError as exc:
+                            raise ValueError(f"Invalid numeric fields in {url}") from exc
+                        payload: dict[str, Any] = {
+                            "aggregate_trade_id": trade_id,
+                            "price": row[1],
+                            "quantity": row[2],
+                            "first_trade_id": first_trade_id,
+                            "last_trade_id": last_trade_id,
+                            "timestamp_ms": timestamp,
+                            "is_buyer_maker": row[6].strip().lower() in {"true", "1"},
+                            "is_best_match": (
+                                row[7].strip().lower() in {"true", "1"} if len(row) > 7 else None
+                            ),
+                            "source": "binance_official_bulk_archive",
+                            "archive_url": url,
+                        }
+                        records.append(DataRecord(
+                            "binance", self.market_type, "agg_trades", symbol,
+                            timestamp, str(trade_id), payload,
+                        ))
+                    return records
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"Invalid ZIP archive: {url}") from exc
+
+    @staticmethod
+    def _agg_trade_archive_symbol(url: str) -> str:
+        name = url.rstrip("/").rsplit("/", 1)[-1]
+        match = re.fullmatch(r"(.+)-aggTrades-\\d{4}-\\d{2}\\.zip", name)
+        if not match:
+            raise ValueError(f"Cannot infer symbol from aggregate-trade archive filename: {name}")
+        return match.group(1)
+
     def fetch_kline_archive(self, url: str) -> list[DataRecord]:
         """Download one monthly ZIP and parse its CSV rows without changing native values."""
         response = self._get(url)
