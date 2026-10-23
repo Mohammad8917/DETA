@@ -301,3 +301,32 @@ def test_futures_mark_price_kline_archive_is_kept_separate_from_native_klines() 
     assert record.payload["raw_columns"][5] == "0"
     assert "volume" not in record.payload
     adapter.close()
+
+
+def test_futures_funding_rate_archive_discovery_and_parsing() -> None:
+    directory = (
+        "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/"
+    )
+    url = directory + "BTCUSDT-fundingRate-2024-01.zip"
+    listing = '<a href="BTCUSDT-fundingRate-2024-01.zip">jan</a>'
+    csv_text = (
+        "calc_time,funding_interval_hours,last_funding_rate\n"
+        "1700000000000,8,0.0001\n"
+    )
+    archive_bytes = make_zip(csv_text)
+    client = MockClient({
+        directory: listing,
+        url: archive_bytes,
+        url + ".CHECKSUM": checksum_text(archive_bytes, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("usd-m", client=client, request_pause=0)
+    assert adapter.list_monthly_funding_rate_archives(
+        "BTCUSDT", "2024-01", "2024-01"
+    ) == [url]
+    record = adapter.fetch_funding_rate_archive(url)[0]
+    assert record.data_type == "funding_rate"
+    assert record.market_type == "binance_usd_m_futures"
+    assert record.timestamp_ms == 1700000000000
+    assert record.payload["funding_interval_hours"] == "8"
+    assert record.payload["last_funding_rate"] == "0.0001"
+    adapter.close()
