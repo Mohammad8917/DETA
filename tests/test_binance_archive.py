@@ -88,3 +88,31 @@ def test_invalid_month_is_rejected(month: str) -> None:
 def test_archive_adapter_rejects_unknown_market() -> None:
     with pytest.raises(ValueError, match="Unsupported Binance archive market"):
         BinanceArchiveAdapter("options")  # type: ignore[arg-type]
+
+
+def test_aggregate_trade_archive_discovery_and_parsing() -> None:
+    directory = (
+        "https://data.binance.vision/data/spot/monthly/aggTrades/BTCUSDT/"
+    )
+    archive_url = directory + "BTCUSDT-aggTrades-2024-01.zip"
+    listing = (
+        '<a href="BTCUSDT-aggTrades-2024-01.zip">jan</a>'
+        '<a href="BTCUSDT-aggTrades-2024-01.zip.CHECKSUM">checksum</a>'
+    )
+    csv_text = (
+        "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,"
+        "is_buyer_maker,is_best_match\\n"
+        "123,65000.1,0.002,120,125,1704067200000,true,true\\n"
+    )
+    client = MockClient({directory: listing, archive_url: make_zip(csv_text)})
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_monthly_agg_trade_archives(
+        "BTCUSDT", start_month="2024-01", end_month="2024-01"
+    ) == [archive_url]
+    records = adapter.fetch_agg_trade_archive(archive_url)
+    assert len(records) == 1
+    assert records[0].data_type == "agg_trades"
+    assert records[0].record_key == "123"
+    assert records[0].payload["is_buyer_maker"] is True
+    assert records[0].payload["is_best_match"] is True
+    adapter.close()
