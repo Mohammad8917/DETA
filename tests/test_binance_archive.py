@@ -188,3 +188,30 @@ def test_spot_aggregate_trade_microsecond_timestamp_is_normalized() -> None:
     assert record.payload["source_timestamp"] == 1735689600010866
     assert record.payload["source_timestamp_unit"] == "microseconds"
     adapter.close()
+
+
+def test_individual_trade_archive_discovery_and_parsing() -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/trades/ETHUSDT/"
+    archive_url = directory + "ETHUSDT-trades-2025-01.zip"
+    listing = '<a href="ETHUSDT-trades-2025-01.zip">jan</a>'
+    csv_text = (
+        "id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch\\n"
+        "42,3000.5,0.25,750.125,1735689600010866,true,true\\n"
+    )
+    archive_bytes = make_zip(csv_text)
+    client = MockClient({
+        directory: listing,
+        archive_url: archive_bytes,
+        archive_url + ".CHECKSUM": checksum_text(archive_bytes, archive_url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_monthly_trade_archives(
+        "ETHUSDT", start_month="2025-01", end_month="2025-01"
+    ) == [archive_url]
+    record = adapter.fetch_trade_archive(archive_url)[0]
+    assert record.data_type == "trades"
+    assert record.record_key == "42"
+    assert record.timestamp_ms == 1735689600010
+    assert record.payload["quote_or_base_quantity"] == "750.125"
+    assert record.payload["is_buyer_maker"] is True
+    adapter.close()
