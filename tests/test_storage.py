@@ -120,3 +120,40 @@ def test_archive_manifest_rejects_unknown_status(tmp_path: Path) -> None:
                 market_type="spot", data_type="klines_1m", symbol="BTCUSDT",
                 archive_period="2024-01", status="complete",
             )
+
+
+
+def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        url = "https://example.test/BTCUSDT-1m-2024-01.zip"
+        first_digest = "a" * 64
+        second_digest = "b" * 64
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256=first_digest, size_bytes=100,
+        )
+        store.update_archive_manifest(
+            url, status="imported", imported_at="2026-10-24T00:00:00Z", row_count=10,
+        )
+
+        # A rediscovery or re-verification of identical bytes must not erase import state.
+        store.update_archive_manifest(url, status="verified", checksum_sha256=first_digest)
+        row = store.archive_manifest_summary()[0]
+        assert row["status"] == "imported"
+        assert row["imported_at"] == "2026-10-24T00:00:00Z"
+
+        # A different checksum represents different content; the old import timestamp
+        # must be invalidated and the new content must pass verification/import again.
+        store.update_archive_manifest(
+            url, status="downloaded", checksum_sha256=second_digest, size_bytes=101,
+        )
+        row = store.archive_manifest_summary()[0]
+        assert row["status"] == "downloaded"
+        assert row["checksum_sha256"] == second_digest
+        assert row["imported_at"] is None
+
+        with pytest.raises(ValueError, match="must be verified"):
+            store.update_archive_manifest(url, status="imported", checksum_sha256="c" * 64)
