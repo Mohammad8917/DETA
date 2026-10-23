@@ -118,6 +118,60 @@ class BinanceArchiveAdapter:
                 symbols.add(name)
         return sorted(symbols)
 
+    def list_daily_archives(
+        self, dataset: str, symbol: str, interval: str | None = None,
+        start_month: str | None = None, end_month: str | None = None,
+    ) -> list[str]:
+        """Return official daily archives for a dataset, optionally bounded by month."""
+        if dataset not in {"klines", "aggTrades", "trades"}:
+            raise ValueError(f"Unsupported Binance daily archive dataset: {dataset}")
+        if not symbol or "/" in symbol or "\\" in symbol:
+            raise ValueError("Invalid symbol for archive path")
+        if dataset == "klines":
+            if interval not in self.candle_intervals:
+                raise ValueError(f"Unsupported Binance kline interval: {interval}")
+            archive_interval = "1mo" if interval == "1M" else interval
+            directory = (
+                f"{self.base_url}/data/{self.archive_market_path}/daily/klines/"
+                f"{symbol}/{archive_interval}/"
+            )
+            pattern = re.compile(
+                rf"^{re.escape(symbol)}-{re.escape(archive_interval)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
+            )
+        else:
+            directory = (
+                f"{self.base_url}/data/{self.archive_market_path}/daily/{dataset}/{symbol}/"
+            )
+            pattern = re.compile(
+                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
+            )
+        start = self._parse_month(start_month) if start_month else None
+        end = self._parse_month(end_month) if end_month else None
+        if start and end and start > end:
+            raise ValueError("start_month must not be later than end_month")
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code == 404:
+            return []
+        parser = _Links()
+        parser.feed(response.text)
+        found: list[tuple[date, str]] = []
+        for href in parser.hrefs:
+            name = href.rstrip("/").rsplit("/", 1)[-1]
+            match = pattern.fullmatch(name)
+            if not match:
+                continue
+            try:
+                day = date.fromisoformat(match.group(1))
+            except ValueError as exc:
+                raise ValueError(f"Invalid daily archive date in filename: {name}") from exc
+            month = day.replace(day=1)
+            if start and month < start:
+                continue
+            if end and month > end:
+                continue
+            found.append((day, urljoin(directory, href)))
+        return [url for _, url in sorted(set(found), key=lambda item: item[0])]
+
     def list_monthly_archives(
         self, symbol: str, interval: str, start_month: str | None = None,
         end_month: str | None = None,
