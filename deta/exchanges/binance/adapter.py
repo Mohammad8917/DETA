@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -63,12 +64,12 @@ class BinanceSpotAdapter:
             })
         return symbols
 
-    def fetch_klines(self, symbol: str, interval: str, start_ms: int,
-                     end_ms: int | None = None) -> list[DataRecord]:
+    def iter_klines(self, symbol: str, interval: str, start_ms: int,
+                    end_ms: int | None = None) -> Iterator[list[DataRecord]]:
+        """Yield one API page at a time so historical backfills have bounded memory use."""
         if interval not in self.candle_intervals:
             raise ValueError(f"Unsupported Binance kline interval: {interval}")
         cursor = max(0, start_ms)
-        records: list[DataRecord] = []
         while True:
             params: dict[str, Any] = {"symbol": symbol, "interval": interval,
                                       "startTime": cursor, "limit": 1000}
@@ -76,7 +77,8 @@ class BinanceSpotAdapter:
                 params["endTime"] = end_ms
             rows = self._get("/api/v3/klines", params)
             if not rows:
-                break
+                return
+            records: list[DataRecord] = []
             for row in rows:
                 open_time = int(row[0])
                 payload = {"interval": interval, "open_time_ms": open_time,
@@ -86,17 +88,25 @@ class BinanceSpotAdapter:
                     "taker_buy_quote_volume": row[10], "source": "binance_rest_native"}
                 records.append(DataRecord(self.exchange_id, self.market_type,
                     f"klines_{interval}", symbol, open_time, str(open_time), payload))
+            if not records:
+                return
+            yield records
             next_cursor = int(rows[-1][0]) + 1
             if next_cursor <= cursor or len(rows) < 1000:
-                break
+                return
             cursor = next_cursor
             if end_ms is not None and cursor > end_ms:
-                break
-        return records
+                return
+
+    def fetch_klines(self, symbol: str, interval: str, start_ms: int,
+                     end_ms: int | None = None) -> list[DataRecord]:
+        """Convenience method for small tests; production backfills should use iter_klines."""
+        return [record for page in self.iter_klines(symbol, interval, start_ms, end_ms)
+                for record in page]
 
     def fetch_aggregate_trades(self, symbol: str, start_ms: int = 0,
                                end_ms: int | None = None) -> list[DataRecord]:
-        """Fetch aggregate trades by monotonically increasing aggregate-trade ID."""
+        """Fetch aggregate trades by ID; currently materializes results and is for bounded jobs."""
         cursor = max(0, start_ms)
         records: list[DataRecord] = []
         while True:
