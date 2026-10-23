@@ -4,6 +4,27 @@ DETA is a platform for collecting, storing, validating, and completing historica
 
 Its purpose is historical data coverage and integrity. DETA does not analyze markets, generate trading signals, predict prices, or execute trades.
 
+<!--
+Search terms: historical cryptocurrency market data, Binance historical data downloader,
+crypto OHLCV archive, exchange trade history, Spot and Futures datasets, Python market data collector.
+These terms describe the project's actual scope; unsupported data types are not claimed as implemented.
+-->
+
+[![Tests](https://github.com/Mohammad8917/DETA/actions/workflows/tests.yml/badge.svg)](https://github.com/Mohammad8917/DETA/actions)
+
+**DETA is an open-source Python tool for collecting historical cryptocurrency exchange data** from public APIs and official bulk archives. It is intended for researchers, developers, and data engineers who need reproducible historical datasets for offline analysis and backtesting.
+
+- **Markets currently implemented:** Binance Spot, USDⓈ-M Futures, and COIN-M Futures.
+- **Data currently implemented:** OHLCV klines, aggregate trades, individual trades, funding rates, and selected derivatives price-index candle archives.
+- **Storage:** SQLite, resumable checkpoints, duplicate-safe writes, and SHA-256 verification for supported archive imports.
+- **Runtime:** Python 3.13+.
+- **License:** MIT — see [LICENSE](LICENSE).
+- **Important limitation:** implementation is incomplete; passing tests does not establish complete historical coverage or production-scale throughput.
+
+**Start here:** [Installation and examples](#requirements) · [Implemented features and limitations](#current-implementation-status) · [Architecture](docs/ARCHITECTURE.md) · [Verification gates](docs/BINANCE_VERIFICATION.md) · [Report a bug](https://github.com/Mohammad8917/DETA/issues)
+
+DETA is a historical data collector, not a trading bot: it does not generate trading signals, predict prices, or place orders. It can be useful as a foundation for cryptocurrency historical data pipelines, market-data research, OHLCV datasets, and exchange archive ingestion, within the limitations documented below.
+
 ## Current implementation status
 
 Implemented initial slices:
