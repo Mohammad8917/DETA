@@ -12,7 +12,7 @@ Implemented initial slices:
 - Binance COIN-M Futures: public contract discovery and native historical klines, including perpetual and delivery contract metadata.
 - SQLite persistence with per-dataset checkpoints.
 
-The current implementation is an initial subset, not a complete historical archive. Official monthly and daily kline, aggregate-trade, and individual-trade ZIP archive discovery/import are implemented for Binance Spot, USDⓈ-M, and COIN-M. Daily archives are used for months where no monthly archive is listed, helping cover recent data before monthly publication. Archive SHA-256 sidecars are required and verified before parsing, and Spot archive timestamps expressed in microseconds are normalized to the storage millisecond unit while preserving the original source timestamp. Individual-trade archives, funding rates, mark/index-price history, comprehensive gap reconciliation, and additional exchanges are not yet fully implemented. Passing unit tests does not prove complete real-world historical coverage.
+The current implementation is an initial subset, not a complete historical archive. Official monthly and daily kline, aggregate-trade, and individual-trade ZIP archive discovery/import are implemented for Binance Spot, USDⓈ-M, and COIN-M. Daily archives are used for months where no monthly archive is listed, helping cover recent data before monthly publication. Archive SHA-256 sidecars are required and verified before parsing, and Spot archive timestamps expressed in microseconds are normalized to the storage millisecond unit while preserving the original source timestamp. Individual-trade archive ingestion is implemented. Funding-rate history is available through the Futures public REST adapter; funding-rate archive ingestion, mark/index-price history, comprehensive gap reconciliation, and additional exchanges remain pending. Passing unit tests does not prove complete real-world historical coverage.
 
 ## Scope
 
@@ -92,6 +92,13 @@ Backfill Futures candles:
 ```powershell
 python -m deta.cli backfill-derivative-klines --market usd-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSDT ETHUSDT
 python -m deta.cli backfill-derivative-klines --market coin-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSD_PERP
+```
+
+Backfill historical Futures funding rates:
+
+```powershell
+python -m deta.cli backfill-funding-rates --market usd-m --symbols BTCUSDT ETHUSDT
+python -m deta.cli backfill-funding-rates --market coin-m --symbols BTCUSD_PERP
 ```
 
 Import all listed monthly kline archives for selected symbols/contracts (this can take substantial time and disk space):
