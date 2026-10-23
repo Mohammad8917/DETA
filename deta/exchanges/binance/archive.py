@@ -157,14 +157,14 @@ class BinanceArchiveAdapter:
                 )
                 filename_prefix = f"{symbol}-{self.price_kline_types[dataset]}-{archive_interval}"
             pattern = re.compile(
-                rf"^{re.escape(filename_prefix)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
+                rf"^{re.escape(filename_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$"
             )
         else:
             directory = (
                 f"{self.base_url}/data/{self.archive_market_path}/daily/{dataset}/{symbol}/"
             )
             pattern = re.compile(
-                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
+                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$"
             )
         start = self._parse_month(start_month) if start_month else None
         end = self._parse_month(end_month) if end_month else None
@@ -270,7 +270,7 @@ class BinanceArchiveAdapter:
         parser = _Links()
         parser.feed(response.text)
         pattern = re.compile(
-            rf"^{re.escape(symbol)}-{re.escape(price_type)}-{re.escape(archive_interval)}-(\\d{{4}}-\\d{{2}})\\.zip$"
+            rf"^{re.escape(symbol)}-{re.escape(price_type)}-{re.escape(archive_interval)}-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
         for href in parser.hrefs:
