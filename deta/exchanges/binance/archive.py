@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import re
+from itertools import chain
 import time
 import zipfile
 from datetime import date
@@ -307,7 +308,7 @@ class BinanceArchiveAdapter:
                         header = {value: index for index, value in enumerate(normalized)}
                         data_rows = rows
                     else:
-                        data_rows = iter([first_row, *rows])
+                        data_rows = chain([first_row], rows)
                     records: list[DataRecord] = []
                     for row in data_rows:
                         if not row:
