@@ -50,3 +50,32 @@ def test_futures_kline_records_keep_market_identity() -> None:
     assert page[0].data_type == "klines_1m"
     assert page[0].timestamp_ms == 1000
     adapter.close()
+
+
+def test_funding_rate_records_preserve_market_identity_and_source_values() -> None:
+    adapter = BinanceDerivativesAdapter(
+        "coin-m",
+        client=MockClient([{
+            "symbol": "BTCUSD_PERP",
+            "fundingTime": 1700000000000,
+            "fundingRate": "0.0001",
+            "markPrice": "65000.5",
+        }]),
+        request_pause=0,
+    )
+    pages = list(adapter.iter_funding_rates("BTCUSD_PERP", start_ms=0))
+    assert len(pages) == 1
+    record = pages[0][0]
+    assert record.market_type == "binance_coin_m_futures"
+    assert record.data_type == "funding_rate"
+    assert record.timestamp_ms == 1700000000000
+    assert record.payload["funding_rate"] == "0.0001"
+    assert record.payload["mark_price"] == "65000.5"
+    adapter.close()
+
+
+def test_funding_rate_rejects_invalid_time_range() -> None:
+    adapter = BinanceDerivativesAdapter("usd-m", client=MockClient([]), request_pause=0)
+    with pytest.raises(ValueError, match="Invalid funding-rate time range"):
+        list(adapter.iter_funding_rates("BTCUSDT", start_ms=10, end_ms=9))
+    adapter.close()
