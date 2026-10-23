@@ -271,3 +271,33 @@ def test_daily_kline_archive_discovery_and_identity() -> None:
     assert record.data_type == "klines_1m"
     assert record.timestamp_ms == 1735689600000
     adapter.close()
+
+
+def test_futures_mark_price_kline_archive_is_kept_separate_from_native_klines() -> None:
+    directory = (
+        "https://data.binance.vision/data/futures/um/monthly/markPriceKlines/"
+        "BTCUSDT/1m/"
+    )
+    url = directory + "BTCUSDT-markPrice-1m-2024-01.zip"
+    listing = '<a href="BTCUSDT-markPrice-1m-2024-01.zip">jan</a>'
+    csv_text = (
+        "open_time,open,high,low,close,ignore,close_time,ignore,ignore,ignore,ignore,ignore\n"
+        "1704067200000,1,3,0.5,2,0,1704067259999,0,0,0,0,0\n"
+    )
+    archive_bytes = make_zip(csv_text)
+    client = MockClient({
+        directory: listing,
+        url: archive_bytes,
+        url + ".CHECKSUM": checksum_text(archive_bytes, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("usd-m", client=client, request_pause=0)
+    assert adapter.list_monthly_price_kline_archives(
+        "BTCUSDT", "1m", "markPrice", "2024-01", "2024-01"
+    ) == [url]
+    record = adapter.fetch_price_kline_archive(url, "markPrice")[0]
+    assert record.data_type == "mark_price_klines_1m"
+    assert record.market_type == "binance_usd_m_futures"
+    assert record.payload["close"] == "2"
+    assert record.payload["raw_columns"][5] == "0"
+    assert "volume" not in record.payload
+    adapter.close()
