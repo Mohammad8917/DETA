@@ -195,8 +195,8 @@ def test_individual_trade_archive_discovery_and_parsing() -> None:
     archive_url = directory + "ETHUSDT-trades-2025-01.zip"
     listing = '<a href="ETHUSDT-trades-2025-01.zip">jan</a>'
     csv_text = (
-        "id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch\\n"
-        "42,3000.5,0.25,750.125,1735689600010866,true,true\\n"
+        "id,price,qty,quoteQty,time,isBuyerMaker,isBestMatch\n"
+        "42,3000.5,0.25,750.125,1735689600010866,true,true\n"
     )
     archive_bytes = make_zip(csv_text)
     client = MockClient({
