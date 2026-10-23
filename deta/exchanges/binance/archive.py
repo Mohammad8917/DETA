@@ -312,7 +312,8 @@ class BinanceArchiveAdapter:
                     for row in reader:
                         if not row:
                             continue
-                        if row[0].strip().lower() in {"id", "trade_id"}:
+                        header = row[0].strip().lower().replace(" ", "_")
+                        if header in {"id", "trade_id"}:
                             continue
                         if len(row) < 6:
                             raise ValueError(
@@ -373,7 +374,8 @@ class BinanceArchiveAdapter:
                     for row in reader:
                         if not row:
                             continue
-                        if row[0].strip().lower() in {"agg_trade_id", "aggregate_trade_id"}:
+                        header = row[0].strip().lower().replace(" ", "_")
+                        if header in {"agg_trade_id", "agg_tradeid", "aggregate_trade_id"}:
                             continue
                         if len(row) < 7:
                             raise ValueError(
