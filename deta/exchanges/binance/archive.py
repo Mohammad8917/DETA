@@ -93,13 +93,15 @@ class BinanceArchiveAdapter:
                 time.sleep(min(30.0, 2**attempt))
         raise RuntimeError(f"Binance archive request failed for {url}: {last_error}") from last_error
 
-    def list_archive_symbols(self, dataset: str) -> list[str]:
-        """Discover symbols from the official monthly archive index, including delisted markets."""
+    def list_archive_symbols(self, dataset: str, frequency: str = "monthly") -> list[str]:
+        """Discover symbols from official monthly/daily archive indexes, including delisted markets."""
         folders = {"klines": "klines", "aggTrades": "aggTrades", "trades": "trades"}
         if dataset not in folders:
             raise ValueError(f"Unsupported Binance archive dataset index: {dataset}")
+        if frequency not in {"monthly", "daily"}:
+            raise ValueError(f"Unsupported archive frequency: {frequency}")
         directory = (
-            f"{self.base_url}/data/{self.archive_market_path}/monthly/{folders[dataset]}/"
+            f"{self.base_url}/data/{self.archive_market_path}/{frequency}/{folders[dataset]}/"
         )
         response = self._get(directory, allow_not_found=True)
         if response.status_code == 404:
