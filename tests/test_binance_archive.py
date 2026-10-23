@@ -101,8 +101,8 @@ def test_aggregate_trade_archive_discovery_and_parsing() -> None:
     )
     csv_text = (
         "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,"
-        "is_buyer_maker,is_best_match\\n"
-        "123,65000.1,0.002,120,125,1704067200000,true,true\\n"
+        "is_buyer_maker,is_best_match\n"
+        "123,65000.1,0.002,120,125,1704067200000,true,true\n"
     )
     client = MockClient({directory: listing, archive_url: make_zip(csv_text)})
     adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
