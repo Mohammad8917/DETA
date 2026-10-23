@@ -228,3 +228,18 @@ def test_monthly_interval_alias_uses_official_1mo_archive_name() -> None:
         "BTCUSDT", "1M", start_month="2024-01", end_month="2024-01"
     ) == [directory + "BTCUSDT-1mo-2024-01.zip"]
     adapter.close()
+
+
+def test_archive_index_discovers_historical_symbols() -> None:
+    directory = "https://data.binance.vision/data/futures/um/monthly/klines/"
+    listing = (
+        '<a href="BTCUSDT/">BTCUSDT/</a>'
+        '<a href="OLDUSDT/">OLDUSDT/</a>'
+        '<a href="BTCUSDT/1m/">nested-looking</a>'
+        '<a href="some-file.zip">file</a>'
+        '<a href="../">Parent Directory/</a>'
+    )
+    client = MockClient({directory: listing})
+    adapter = BinanceArchiveAdapter("usd-m", client=client, request_pause=0)
+    assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
+    adapter.close()
