@@ -1,10 +1,16 @@
 # DETA — Public Exchange Data Archive
 
-DETA is intended to discover and collect publicly available cryptocurrency market data, from the oldest history each source actually exposes through ongoing updates. It must never fabricate records or claim full coverage without evidence.
+DETA aims to collect publicly accessible cryptocurrency market data from the oldest history each source actually exposes through ongoing updates. It must never fabricate records or claim complete coverage without evidence.
 
 ## Current implementation status
 
-The first runnable slice supports **Binance Spot** symbol discovery, historical native klines, and page-streamed aggregate trades through Binance's public REST API. Data is persisted locally in SQLite with per-dataset checkpoints. Other exchanges and additional data types are not implemented yet. This is **not** a complete ten-exchange collector.
+Implemented initial slices:
+- Binance Spot: public symbol discovery, native klines, and page-streamed aggregate trades.
+- Binance USDⓈ-M Futures: public contract discovery and native historical klines.
+- Binance COIN-M Futures: public contract discovery and native historical klines, including contract metadata that distinguishes perpetual and delivery contract types.
+- SQLite persistence with per-dataset checkpoints.
+
+This is not yet a complete archive, ten-exchange collector, continuous live collector, or automated trading system. Futures trades and other derivatives datasets are not implemented by the futures adapter yet.
 
 ## Requirements
 
@@ -12,7 +18,7 @@ The first runnable slice supports **Binance Spot** symbol discovery, historical 
 - Network access to public exchange APIs
 - Sufficient local disk space; exhaustive trade history can become very large
 
-Install for development:
+Install:
 
 ```powershell
 py -3.13 -m venv .venv
@@ -21,42 +27,52 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-Refresh Binance Spot symbol metadata:
+Discover Binance Spot symbols:
 
 ```powershell
 python -m deta.cli discover
 ```
 
-Backfill candles for all currently trading discovered Spot symbols at selected intervals:
+Backfill Spot candles:
 
 ```powershell
-python -m deta.cli backfill-klines --intervals 1m 5m 15m 1h 4h 1d
+python -m deta.cli backfill-klines --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSDT ETHUSDT
 ```
 
-Backfill aggregate trades for selected symbols (or all current trading symbols if omitted):
+Backfill Spot aggregate trades:
 
 ```powershell
 python -m deta.cli backfill-agg-trades --symbols BTCUSDT ETHUSDT
 ```
 
-The aggregate-trade command starts from the earliest timestamp requested by `--start-ms` (default 0), resumes from saved aggregate trade IDs, and can be bounded using `--end-ms`. A checkpoint proves progress, not that the exchange exposed every historical trade.
+Discover Binance futures contracts (USDⓈ-M and COIN-M):
 
-Check saved coverage and per-dataset state:
+```powershell
+python -m deta.cli discover-derivatives --market usd-m
+python -m deta.cli discover-derivatives --market coin-m
+```
+
+Backfill futures candles:
+
+```powershell
+python -m deta.cli backfill-derivative-klines --market usd-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSDT ETHUSDT
+python -m deta.cli backfill-derivative-klines --market coin-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSD_PERP
+```
+
+Check stored dataset state:
 
 ```powershell
 python -m deta.cli status
 ```
 
-Use `--db PATH` before the command to select another SQLite database. Use a small `--symbols` list before attempting broad backfills.
+Use `--db PATH` before the command to select another SQLite database. Start with a small symbol list before broad backfills.
 
-## Important limitations
+## Scope and limitations
 
-- Public endpoints expose different datasets and different history windows. DETA can only collect data that an exchange makes accessible; no software can recover data the source never published or no longer serves.
-- A successful process exit is not proof of historical completeness. Dataset status remains partial/failed unless coverage is independently established; there is no false guarantee that all old data exists.
-- The collector refreshes current symbol metadata before each backfill. Symbols missing from the latest discovery are retained as historical metadata but marked not currently listed, so they are not silently treated as active symbols.
-- This first slice is **not yet a continuous live collector**, and does not yet support ten exchanges, derivatives, historical order books, funding/open-interest/liquidation archives, or delisted-symbol trade archives.
-- Historical ticker snapshots and historical order books generally cannot be reconstructed from current snapshots.
-- SQLite is an initial local store, not the final high-throughput format for a multi-terabyte archive.
-- No private account credentials, wallet access, or order-placement functionality is used.
+The target scope includes Spot, perpetual futures, and non-perpetual/delivery futures; historical and live public data; and a separate automated-trading capability. Automated trading is **not implemented yet** and no order is placed by the current code. A real trading engine must be a separately tested module with paper mode by default, explicit opt-in for live mode, strict risk limits, and credentials supplied through local environment/secret storage—not committed to Git.
 
-See `docs/ARCHITECTURE.md` for the contracts and implementation sequence.
+Public endpoints expose different datasets and history windows. “All historical data without exception” cannot be guaranteed literally: DETA can only collect data that the source publishes and still makes accessible. Historical order books, snapshots, liquidation records, and delisted-contract data must be marked unavailable if no source archive exists. The project should aim for exhaustive coverage of every verified public dataset and record explicit gaps rather than invent data.
+
+SQLite is the current initial store, not a proven high-throughput format for a multi-terabyte archive. This implementation is not yet a continuous live collector or a complete ten-exchange system.
+
+See `docs/ARCHITECTURE.md` for the implementation contracts.

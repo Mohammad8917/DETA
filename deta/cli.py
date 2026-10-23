@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from deta.exchanges.binance import BinanceSpotAdapter
+from deta.exchanges.binance.derivatives import BinanceDerivativesAdapter
 from deta.storage import SQLiteStore
 
 
@@ -27,6 +28,13 @@ def build_parser() -> argparse.ArgumentParser:
     trades.add_argument("--start-ms", type=int, default=0, help="Initial timestamp in Unix milliseconds")
     trades.add_argument("--end-ms", type=int, help="Optional inclusive ending timestamp in Unix milliseconds")
     trades.add_argument("--include-inactive", action="store_true")
+    derivative_discover = commands.add_parser("discover-derivatives", help="Refresh Binance futures contract metadata")
+    derivative_discover.add_argument("--market", choices=("usd-m", "coin-m"), required=True)
+    derivative_candles = commands.add_parser("backfill-derivative-klines", help="Backfill Binance futures candles")
+    derivative_candles.add_argument("--market", choices=("usd-m", "coin-m"), required=True)
+    derivative_candles.add_argument("--intervals", nargs="+", default=["1m", "5m", "15m", "1h", "4h", "1d"])
+    derivative_candles.add_argument("--symbols", nargs="*", help="Optional contract symbols")
+    derivative_candles.add_argument("--include-inactive", action="store_true")
     commands.add_parser("status", help="Show locally stored dataset coverage/status")
     return parser
 
@@ -59,6 +67,67 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "status":
             print(json.dumps(store.dataset_summary(), indent=2, ensure_ascii=False))
             return 0
+        if args.command in ("discover-derivatives", "backfill-derivative-klines"):
+            adapter = BinanceDerivativesAdapter(args.market)
+            try:
+                if args.command == "discover-derivatives":
+                    symbols = adapter.discover_symbols()
+                    store.save_symbols(symbols)
+                    print(json.dumps({
+                        "exchange": "binance", "market_type": adapter.market_type,
+                        "contracts_discovered": len(symbols),
+                        "trading_contracts": sum(s.get("status") == "TRADING" for s in symbols),
+                        "contract_types": sorted({str(s.get("contract_type")) for s in symbols}),
+                    }, indent=2))
+                    return 0
+                discovered = adapter.discover_symbols()
+                store.save_symbols(discovered)
+                symbols = store.get_symbols("binance", adapter.market_type)
+                wanted = set(args.symbols) if args.symbols else None
+                if wanted is not None:
+                    symbols = [item for item in symbols if item["symbol"] in wanted]
+                if not args.include_inactive:
+                    symbols = [item for item in symbols if item.get("status") == "TRADING"
+                               and item.get("is_currently_listed", True)]
+                failed = pages_saved = rows_saved = 0
+                for item in symbols:
+                    symbol = str(item["symbol"])
+                    for interval in args.intervals:
+                        data_type = f"klines_{interval}"
+                        checkpoint = store.get_checkpoint("binance", adapter.market_type, data_type, symbol)
+                        cursor = int(checkpoint) if checkpoint is not None else 0
+                        try:
+                            for page in adapter.iter_klines(symbol, interval, cursor):
+                                last = max(record.timestamp_ms for record in page)
+                                inserted = store.save_batch(
+                                    page, cursor=str(last + 1), status="partial",
+                                    detail="Native futures candles saved; historical completeness not independently verified",
+                                )
+                                pages_saved += 1
+                                rows_saved += inserted
+                                cursor = last + 1
+                            if cursor == 0:
+                                store.update_checkpoint(
+                                    "binance", adapter.market_type, data_type, symbol,
+                                    checkpoint, "partial", "No rows returned; earliest availability not proven",
+                                )
+                        except Exception as exc:
+                            failed += 1
+                            store.update_checkpoint(
+                                "binance", adapter.market_type, data_type, symbol,
+                                str(cursor) if cursor else checkpoint, "failed",
+                                f"{type(exc).__name__}: {exc}",
+                            )
+                            log.exception("Failed futures dataset %s %s", symbol, interval)
+                print(json.dumps({
+                    "exchange": "binance", "market_type": adapter.market_type,
+                    "contracts_attempted": len(symbols), "pages_saved": pages_saved,
+                    "new_rows_saved": rows_saved, "datasets_failed": failed,
+                    "note": "Successful completion does not prove full historical coverage.",
+                }, indent=2))
+                return 1 if failed else 0
+            finally:
+                adapter.close()
         adapter = BinanceSpotAdapter()
         try:
             if args.command == "discover":
