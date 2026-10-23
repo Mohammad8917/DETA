@@ -243,3 +243,31 @@ def test_archive_index_discovers_historical_symbols() -> None:
     adapter = BinanceArchiveAdapter("usd-m", client=client, request_pause=0)
     assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
     adapter.close()
+
+
+def test_daily_kline_archive_discovery_and_identity() -> None:
+    directory = (
+        "https://data.binance.vision/data/spot/daily/klines/"
+        "BTCUSDT/1m/"
+    )
+    url = directory + "BTCUSDT-1m-2025-01-01.zip"
+    listing = (
+        '<a href="BTCUSDT-1m-2025-01-01.zip">day</a>'
+        '<a href="BTCUSDT-1m-2025-01-02.zip">next day</a>'
+    )
+    archive_bytes = make_zip(
+        "1735689600000000,1,3,0.5,2,10,1735689659999999,20,4,6,12,0\n"
+    )
+    client = MockClient({
+        directory: listing,
+        url: archive_bytes,
+        url + ".CHECKSUM": checksum_text(archive_bytes, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_daily_archives(
+        "klines", "BTCUSDT", "1m", "2025-01", "2025-01"
+    ) == [url, directory + "BTCUSDT-1m-2025-01-02.zip"]
+    record = adapter.fetch_kline_archive(url)[0]
+    assert record.data_type == "klines_1m"
+    assert record.timestamp_ms == 1735689600000
+    adapter.close()
