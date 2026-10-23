@@ -37,6 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
     derivative_candles.add_argument("--intervals", nargs="+", default=["1m", "5m", "15m", "1h", "4h", "1d"])
     derivative_candles.add_argument("--symbols", nargs="*", help="Optional contract symbols")
     derivative_candles.add_argument("--include-inactive", action="store_true")
+    funding = commands.add_parser(
+        "backfill-funding-rates", help="Backfill historical Binance Futures funding rates"
+    )
+    funding.add_argument("--market", choices=("usd-m", "coin-m"), required=True)
+    funding.add_argument("--symbols", nargs="*", help="Optional contract symbols; default is all locally known")
+    funding.add_argument("--start-ms", type=int, default=0, help="Initial Unix timestamp in milliseconds")
+    funding.add_argument("--end-ms", type=int, help="Optional inclusive ending Unix timestamp in milliseconds")
     archive = commands.add_parser(
         "backfill-archive-klines",
         help="Import Binance official monthly historical kline ZIP archives",
@@ -353,6 +360,65 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _backfill_archive_trades(
                 store, args.market, args.symbols, args.start_month, args.end_month
             )
+        if args.command == "backfill-funding-rates":
+            if args.start_ms < 0 or (
+                args.end_ms is not None and args.end_ms < args.start_ms
+            ):
+                log.error("Invalid funding-rate time range")
+                return 2
+            adapter = BinanceDerivativesAdapter(args.market)
+            try:
+                store.save_symbols(adapter.discover_symbols())
+                symbols = store.get_symbols("binance", adapter.market_type)
+                if args.symbols:
+                    wanted = set(args.symbols)
+                    known = {str(item["symbol"]): item for item in symbols}
+                    symbols = [known.get(symbol, {"symbol": symbol}) for symbol in sorted(wanted)]
+                failed = pages_saved = rows_saved = 0
+                for item in symbols:
+                    symbol = str(item["symbol"])
+                    data_type = "funding_rate"
+                    checkpoint = store.get_checkpoint(
+                        "binance", adapter.market_type, data_type, symbol
+                    )
+                    cursor = max(args.start_ms, int(checkpoint)) if checkpoint is not None else args.start_ms
+                    pages_for_symbol = 0
+                    try:
+                        for page in adapter.iter_funding_rates(symbol, cursor, args.end_ms):
+                            last = max(record.timestamp_ms for record in page)
+                            inserted = store.save_batch(
+                                page, cursor=str(last + 1), status="partial",
+                                detail="Funding-rate history saved; full source coverage not independently verified",
+                            )
+                            pages_saved += 1
+                            pages_for_symbol += 1
+                            rows_saved += inserted
+                        if pages_for_symbol == 0:
+                            store.update_checkpoint(
+                                "binance", adapter.market_type, data_type, symbol,
+                                checkpoint, "partial",
+                                "No rows returned for requested range; availability is unverified",
+                            )
+                    except Exception as exc:
+                        failed += 1
+                        store.update_checkpoint(
+                            "binance", adapter.market_type, data_type, symbol,
+                            str(cursor) if cursor else checkpoint, "failed",
+                            f"{type(exc).__name__}: {exc}",
+                        )
+                        log.exception("Failed funding-rate dataset %s", symbol)
+                print(json.dumps({
+                    "exchange": "binance",
+                    "market_type": adapter.market_type,
+                    "contracts_attempted": len(symbols),
+                    "pages_saved": pages_saved,
+                    "new_rows_saved": rows_saved,
+                    "datasets_failed": failed,
+                    "note": "Successful completion does not prove full historical coverage.",
+                }, indent=2))
+                return 1 if failed else 0
+            finally:
+                adapter.close()
         if args.command in ("discover-derivatives", "backfill-derivative-klines"):
             adapter = BinanceDerivativesAdapter(args.market)
             try:
