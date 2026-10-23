@@ -35,7 +35,7 @@ def make_zip(csv_text: str) -> bytes:
 
 
 def checksum_text(payload: bytes, filename: str) -> str:
-    return f"{hashlib.sha256(payload).hexdigest()}  {filename}\\n"
+    return f"{hashlib.sha256(payload).hexdigest()}  {filename}\n"
 
 
 def test_archive_discovery_filters_exact_months_and_ignores_checksums() -> None:
@@ -137,11 +137,11 @@ def test_archive_checksum_mismatch_is_rejected() -> None:
         "BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
     )
     archive_bytes = make_zip(
-        "1704067200000,1,3,0.5,2,10,1704067259999,20,4,6,12,0\\n"
+        "1704067200000,1,3,0.5,2,10,1704067259999,20,4,6,12,0\n"
     )
     client = MockClient({
         url: archive_bytes,
-        url + ".CHECKSUM": "0" * 64 + "  BTCUSDT-1m-2024-01.zip\\n",
+        url + ".CHECKSUM": "0" * 64 + "  BTCUSDT-1m-2024-01.zip\n",
     })
     adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
@@ -155,7 +155,7 @@ def test_spot_microsecond_archive_timestamps_are_normalized_to_milliseconds() ->
         "BTCUSDT/1m/BTCUSDT-1m-2025-01.zip"
     )
     archive_bytes = make_zip(
-        "1735689600000000,1,3,0.5,2,10,1735689659999999,20,4,6,12,0\\n"
+        "1735689600000000,1,3,0.5,2,10,1735689659999999,20,4,6,12,0\n"
     )
     client = MockClient({
         url: archive_bytes,
@@ -176,7 +176,7 @@ def test_spot_aggregate_trade_microsecond_timestamp_is_normalized() -> None:
         "BTCUSDT-aggTrades-2025-01.zip"
     )
     archive_bytes = make_zip(
-        "0,0.2,50,0,0,1735689600010866,False,True\\n"
+        "0,0.2,50,0,0,1735689600010866,False,True\n"
     )
     client = MockClient({
         url: archive_bytes,
