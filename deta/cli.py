@@ -312,6 +312,7 @@ def _backfill_archive_funding_rates(
         for item in selected:
             symbol = str(item["symbol"])
             data_type = "funding_rate"
+            current_archive_url = None
             try:
                 urls = archive.list_monthly_funding_rate_archives(
                     symbol, start_month, end_month
@@ -325,7 +326,6 @@ def _backfill_archive_funding_rates(
                         "No official monthly funding-rate archives listed; coverage is unknown",
                     )
                     continue
-                current_archive_url = None
                 for url in urls:
                     current_archive_url = url
                     store.upsert_archive_manifest(
