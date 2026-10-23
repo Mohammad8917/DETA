@@ -345,6 +345,7 @@ class BinanceArchiveAdapter:
                         payload: dict[str, Any] = {
                             "funding_time_ms": timestamp,
                             "funding_interval_hours": interval_hours,
+                            "funding_rate": rate,
                             "last_funding_rate": rate,
                             "source": "binance_official_bulk_archive",
                             "archive_url": url,
