@@ -7,7 +7,6 @@ import io
 import re
 import time
 import zipfile
-from collections.abc import Iterator
 from datetime import date
 from html.parser import HTMLParser
 from typing import Any
@@ -66,7 +65,7 @@ class BinanceArchiveAdapter:
         if self._owns_client:
             self._client.close()
 
-    def _get(self, url: str) -> httpx.Response:
+    def _get(self, url: str, *, allow_not_found: bool = False) -> httpx.Response:
         last_error: Exception | None = None
         for attempt in range(6):
             try:
@@ -78,6 +77,8 @@ class BinanceArchiveAdapter:
                     last_error = RuntimeError(f"HTTP {response.status_code} for {url}")
                     time.sleep(min(30.0, 2**attempt))
                     continue
+                if response.status_code == 404 and allow_not_found:
+                    return response
                 response.raise_for_status()
                 if self.request_pause:
                     time.sleep(self.request_pause)
@@ -107,7 +108,9 @@ class BinanceArchiveAdapter:
             f"{self.base_url}/data/{self.archive_market_path}/monthly/klines/"
             f"{symbol}/{interval}/"
         )
-        response = self._get(directory)
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code == 404:
+            return []
         parser = _Links()
         parser.feed(response.text)
         pattern = re.compile(
