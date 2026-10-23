@@ -1,0 +1,72 @@
+name: Binance live archive smoke check
+
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: "Market family to check"
+        required: true
+        type: choice
+        options:
+          - spot
+          - usd-m
+          - coin-m
+      symbol:
+        description: "One symbol/contract only (for example BTCUSDT)"
+        required: true
+        default: BTCUSDT
+        type: string
+      month:
+        description: "One archive month in YYYY-MM format"
+        required: true
+        default: "2024-01"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live-archive-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install package
+        run: python -m pip install -e .
+      - name: Validate bounded inputs
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+          MONTH: ${{ inputs.month }}
+        run: |
+          set -euo pipefail
+          [[ "$MONTH" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]]
+          [[ "$SYMBOL" =~ ^[A-Za-z0-9_]{2,30}$ ]]
+          mkdir -p artifacts
+          printf 'market=%s\nsymbol=%s\nmonth=%s\n' "$MARKET" "$SYMBOL" "$MONTH" | tee artifacts/request.txt
+      - name: Import one official archive month and verify checksum
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+          MONTH: ${{ inputs.month }}
+        run: |
+          set -euo pipefail
+          python -m deta.cli --db artifacts/live-smoke.sqlite3 backfill-archive-klines \
+            --market "$MARKET" --symbols "$SYMBOL" --intervals 1m \
+            --start-month "$MONTH" --end-month "$MONTH" 2>&1 | tee artifacts/import.log
+      - name: Record resulting dataset summary
+        if: always()
+        run: |
+          if [[ -f artifacts/live-smoke.sqlite3 ]]; then
+            python -m deta.cli --db artifacts/live-smoke.sqlite3 status | tee artifacts/status.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: binance-live-archive-smoke-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
