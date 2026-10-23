@@ -54,6 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
     price_archive.add_argument("--symbols", nargs="*", help="Optional contracts; otherwise discover from archive indexes")
     price_archive.add_argument("--start-month", help="Optional inclusive YYYY-MM archive month")
     price_archive.add_argument("--end-month", help="Optional inclusive YYYY-MM archive month")
+    funding_archive = commands.add_parser(
+        "backfill-archive-funding-rates",
+        help="Import official monthly Binance Futures funding-rate archives",
+    )
+    funding_archive.add_argument("--market", choices=("usd-m", "coin-m"), required=True)
+    funding_archive.add_argument("--symbols", nargs="*", help="Optional contracts; otherwise discover from archive indexes")
+    funding_archive.add_argument("--start-month", help="Optional inclusive YYYY-MM archive month")
+    funding_archive.add_argument("--end-month", help="Optional inclusive YYYY-MM archive month")
     archive = commands.add_parser(
         "backfill-archive-klines",
         help="Import Binance official monthly historical kline ZIP archives",
@@ -224,6 +232,91 @@ def _backfill_archive_klines(
         source.close()
         archive.close()
 
+
+
+def _backfill_archive_funding_rates(
+    store: SQLiteStore,
+    market: str,
+    requested_symbols: list[str] | None,
+    start_month: str | None,
+    end_month: str | None,
+) -> int:
+    log = logging.getLogger("deta")
+    source = BinanceDerivativesAdapter(market)
+    archive = BinanceArchiveAdapter(market)
+    try:
+        try:
+            discovered = source.discover_symbols()
+            if discovered:
+                store.save_symbols(discovered)
+        except Exception as exc:
+            log.warning("Current contract discovery failed; continuing with archive indexes: %s", exc)
+        stored_symbols = store.get_symbols("binance", source.market_type)
+        if requested_symbols:
+            known = {str(item["symbol"]): item for item in stored_symbols}
+            selected = [known.get(symbol, {"symbol": symbol}) for symbol in requested_symbols]
+        else:
+            archived = set(archive.list_archive_symbols("fundingRate", "monthly"))
+            known = {str(item["symbol"]): item for item in stored_symbols}
+            selected = [known.get(symbol, {"symbol": symbol})
+                        for symbol in sorted(set(known) | archived)]
+
+        failed = archives_seen = batches_saved = rows_saved = 0
+        for item in selected:
+            symbol = str(item["symbol"])
+            data_type = "funding_rate"
+            try:
+                urls = archive.list_monthly_funding_rate_archives(
+                    symbol, start_month, end_month
+                )
+                if not urls:
+                    cursor = store.get_checkpoint(
+                        "binance", source.market_type, data_type, symbol
+                    )
+                    store.update_checkpoint(
+                        "binance", source.market_type, data_type, symbol, cursor, "partial",
+                        "No official monthly funding-rate archives listed; coverage is unknown",
+                    )
+                    continue
+                for url in urls:
+                    records = archive.fetch_funding_rate_archive(url)
+                    archives_seen += 1
+                    if not records:
+                        continue
+                    candidate_cursor = max(record.timestamp_ms for record in records) + 1
+                    previous = store.get_checkpoint(
+                        "binance", source.market_type, data_type, symbol
+                    )
+                    cursor = max(candidate_cursor, int(previous)) if previous and previous.isdigit() else candidate_cursor
+                    inserted = store.save_batch(
+                        records, cursor=str(cursor), status="partial",
+                        detail="Official funding-rate archives imported; source coverage and gaps are not independently verified",
+                    )
+                    batches_saved += 1
+                    rows_saved += inserted
+            except Exception as exc:
+                failed += 1
+                cursor = store.get_checkpoint("binance", source.market_type, data_type, symbol)
+                store.update_checkpoint(
+                    "binance", source.market_type, data_type, symbol, cursor, "failed",
+                    f"{type(exc).__name__}: {exc}",
+                )
+                log.exception("Failed funding-rate archive dataset %s", symbol)
+        print(json.dumps({
+            "exchange": "binance",
+            "market_type": source.market_type,
+            "dataset": "funding_rate",
+            "contracts_attempted": len(selected),
+            "archives_imported": archives_seen,
+            "batches_saved": batches_saved,
+            "new_rows_saved": rows_saved,
+            "datasets_failed": failed,
+            "note": "Archive import is checksum-verified but does not itself prove complete coverage.",
+        }, indent=2))
+        return 1 if failed else 0
+    finally:
+        source.close()
+        archive.close()
 
 
 def _backfill_archive_price_klines(
@@ -481,6 +574,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if args.command == "backfill-archive-trades":
             return _backfill_archive_trades(
+                store, args.market, args.symbols, args.start_month, args.end_month
+            )
+        if args.command == "backfill-archive-funding-rates":
+            return _backfill_archive_funding_rates(
                 store, args.market, args.symbols, args.start_month, args.end_month
             )
         if args.command == "backfill-archive-price-klines":
