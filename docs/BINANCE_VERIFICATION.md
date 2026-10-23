@@ -1,0 +1,77 @@
+# Binance Verification and Lock Ledger
+
+This file is the source of truth for which Binance DETA behaviours are frozen and which remain unproven. It does not claim that the full Binance historical dataset is complete.
+
+## Lock policy
+
+- A behaviour may be marked **LOCKED** only after its contract is explicit, tests cover success and failure cases, and the relevant CI run is green.
+- Locked behaviour must not be redesigned, renamed, removed, or silently changed. A change requires an explicit request or a documented correctness/security defect, regression tests, and a separate review of the lock.
+- A green unit-test run is not evidence of live-source compatibility or complete historical coverage.
+- Never label a dataset complete merely because an import command succeeded or a checkpoint advanced.
+- Keep DETA limited to historical public-data collection, validation, storage, reconciliation, and coverage reporting. No market analysis, signals, or trading execution.
+
+## Current evidence snapshot
+
+Repository revision assessed for this ledger: `5bf6064c893dbcc59b36596f076240f2ff7e67a7` (2026-10-23).
+
+The GitHub Actions test workflow for that revision completed successfully:
+https://github.com/Mohammad8917/DETA/actions/runs/40032878623
+
+This is test-suite evidence only. It is not a live Binance end-to-end run.
+
+## Locked contracts — current scope only
+
+The following contracts are frozen at the **unit-tested implementation level**. This does not imply exhaustive historical coverage.
+
+1. **Market identity remains distinct**
+   - Spot, USDⓈ-M Futures, and COIN-M Futures must not be conflated.
+   - Perpetual and delivery contracts must retain their distinct source metadata where available.
+2. **Record identity and durable checkpoint contract**
+   - Stored records use dataset identity and a record key for duplicate-safe inserts.
+   - A non-empty batch and its checkpoint are committed in the same SQLite transaction.
+   - Archive re-import must not move a numeric checkpoint backwards.
+3. **Archive integrity**
+   - An archive is not parsed unless its SHA-256 checksum sidecar verifies.
+   - A checksum mismatch is an error, not a warning or successful import.
+4. **Timestamp provenance**
+   - Spot archive timestamps from 2025 onward may be microseconds; normalization to storage milliseconds must preserve the original timestamp and unit in payload provenance.
+5. **Dataset separation**
+   - Native klines, aggregate trades, individual trades, funding rates, and Futures mark/index/premium-price klines remain distinct dataset types.
+   - Mark/index/premium-price candles must not be mislabeled as native OHLCV candles or assigned invented volume.
+6. **Honest status**
+   - Import success must not be reported as proof of continuous history.
+   - Missing, unsupported, failed, partial, and verified-complete coverage must remain distinguishable.
+
+These contracts may be changed only with an explicit, reviewed change and updated tests. A source-specific correction must preserve the contract unless evidence shows the contract itself is wrong.
+
+## Implemented but NOT yet locked as proven
+
+The code contains initial implementations for:
+- Binance Spot, USDⓈ-M Futures, and COIN-M Futures historical klines.
+- Official archive parsing for klines, aggregate trades, individual trades, Futures funding-rate archives, and Futures mark/index/premium-price kline archives.
+- Monthly and daily archive selection, with daily archives used when no monthly archive is listed for that month.
+- Public Futures funding-rate REST retrieval.
+- Archive symbol discovery intended to include historical/delisted symbols.
+
+These implementations are not yet proven end-to-end against the live source across all relevant market/dataset combinations.
+
+## Explicit blockers before Binance can be fully locked
+
+1. **Live archive-index verification:** run the current index-discovery and archive-listing code against the real official source. Unit fixtures currently model HTML anchor listings; this must not be mistaken for proof that the live listing endpoint exposes the same anchors. If the source listing format differs, correct discovery before relying on it.
+2. **Persistent archive manifest:** record each expected archive URL, checksum, verification/import status, row count, timestamps, and errors so interrupted jobs can be audited and resumed without guessing.
+3. **Source inventory and coverage report:** enumerate the source-supported datasets for Spot, USDⓈ-M, and COIN-M separately, and report unsupported/unavailable categories rather than assuming support.
+4. **Gap reconciliation:** compare archive inventory and imported records, detect missing/failed archive files and suspicious timestamp/identifier gaps, and distinguish true missing data from legitimate periods without trades.
+5. **Real integration tests:** verify at least representative historical and recent files for each supported archive family, including checksum verification, CSV schema, timestamp units, and persistence.
+6. **Recovery and scale tests:** demonstrate interruption/restart correctness and measure storage/disk use on representative data volumes. SQLite has not been proven for exhaustive multi-terabyte raw-trade history.
+7. **Final lock review:** freeze each independently proven dataset family only after its evidence, tests, and coverage limitations are recorded here.
+
+## Coverage labels
+
+- **IMPLEMENTED:** code path exists; completeness not implied.
+- **UNIT-VERIFIED:** deterministic tests pass; live source behaviour not implied.
+- **LIVE-VERIFIED:** representative real source requests and files have been checked.
+- **COVERAGE-VERIFIED:** archive/source inventory and stored data have been reconciled over an explicitly stated range.
+- **LOCKED:** contract and evidence have been reviewed and frozen.
+- **PARTIAL / UNAVAILABLE / FAILED:** must be reported accurately; never upgraded to complete without evidence.
+
+Update this ledger in the same change that upgrades any dataset family to LIVE-VERIFIED, COVERAGE-VERIFIED, or LOCKED.
