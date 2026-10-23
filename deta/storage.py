@@ -35,6 +35,25 @@ class SQLiteStore:
                 detail TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (exchange_id, market_type, data_type, symbol)
             );
+            CREATE TABLE IF NOT EXISTS archive_manifest (
+                archive_url TEXT PRIMARY KEY,
+                exchange_id TEXT NOT NULL,
+                market_type TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                archive_period TEXT NOT NULL,
+                checksum_sha256 TEXT,
+                size_bytes INTEGER,
+                row_count INTEGER,
+                status TEXT NOT NULL DEFAULT 'discovered',
+                imported_at TEXT,
+                error TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (status IN ('discovered', 'downloaded', 'verified', 'imported',
+                                  'failed', 'missing', 'unavailable'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_manifest_dataset
+              ON archive_manifest(exchange_id, market_type, data_type, symbol, archive_period);
             CREATE TABLE IF NOT EXISTS symbols (
                 exchange_id TEXT NOT NULL, market_type TEXT NOT NULL, symbol TEXT NOT NULL,
                 metadata_json TEXT NOT NULL, discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -139,6 +158,130 @@ class SQLiteStore:
                    updated_at=CURRENT_TIMESTAMP""",
                 (exchange_id, market_type, data_type, symbol, cursor, status, detail),
             )
+
+    def upsert_archive_manifest(
+        self,
+        *,
+        archive_url: str,
+        exchange_id: str,
+        market_type: str,
+        data_type: str,
+        symbol: str,
+        archive_period: str,
+        status: str = "discovered",
+        checksum_sha256: str | None = None,
+        size_bytes: int | None = None,
+        row_count: int | None = None,
+        imported_at: str | None = None,
+        error: str = "",
+    ) -> None:
+        """Persist one archive's audit state without downgrading a later state on rediscovery."""
+        allowed = {"discovered", "downloaded", "verified", "imported", "failed", "missing", "unavailable"}
+        if status not in allowed:
+            raise ValueError(f"Unsupported archive manifest status: {status}")
+        if not archive_url.strip() or not symbol.strip() or not archive_period.strip():
+            raise ValueError("Archive URL, symbol, and period must be non-empty")
+        if size_bytes is not None and size_bytes < 0:
+            raise ValueError("Archive size must not be negative")
+        if row_count is not None and row_count < 0:
+            raise ValueError("Archive row count must not be negative")
+        if checksum_sha256 is not None and (
+            len(checksum_sha256) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in checksum_sha256)
+        ):
+            raise ValueError("Archive checksum must be a 64-character SHA-256 hex digest")
+        with self._connection:
+            self._connection.execute(
+                """INSERT INTO archive_manifest(
+                       archive_url, exchange_id, market_type, data_type, symbol, archive_period,
+                       checksum_sha256, size_bytes, row_count, status, imported_at, error, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(archive_url) DO UPDATE SET
+                       exchange_id=excluded.exchange_id,
+                       market_type=excluded.market_type,
+                       data_type=excluded.data_type,
+                       symbol=excluded.symbol,
+                       archive_period=excluded.archive_period,
+                       checksum_sha256=COALESCE(excluded.checksum_sha256, archive_manifest.checksum_sha256),
+                       size_bytes=COALESCE(excluded.size_bytes, archive_manifest.size_bytes),
+                       row_count=COALESCE(excluded.row_count, archive_manifest.row_count),
+                       status=CASE
+                           WHEN archive_manifest.status='imported' AND excluded.status='discovered'
+                           THEN archive_manifest.status ELSE excluded.status END,
+                       imported_at=COALESCE(excluded.imported_at, archive_manifest.imported_at),
+                       error=excluded.error,
+                       updated_at=CURRENT_TIMESTAMP""",
+                (archive_url, exchange_id, market_type, data_type, symbol, archive_period,
+                 checksum_sha256, size_bytes, row_count, status, imported_at, error),
+            )
+
+    def update_archive_manifest(
+        self,
+        archive_url: str,
+        *,
+        status: str,
+        checksum_sha256: str | None = None,
+        size_bytes: int | None = None,
+        row_count: int | None = None,
+        imported_at: str | None = None,
+        error: str = "",
+    ) -> None:
+        """Update an already inventoried archive; fail rather than silently create an orphan."""
+        allowed = {"discovered", "downloaded", "verified", "imported", "failed", "missing", "unavailable"}
+        if status not in allowed:
+            raise ValueError(f"Unsupported archive manifest status: {status}")
+        if checksum_sha256 is not None and (
+            len(checksum_sha256) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in checksum_sha256)
+        ):
+            raise ValueError("Archive checksum must be a 64-character SHA-256 hex digest")
+        if size_bytes is not None and size_bytes < 0:
+            raise ValueError("Archive size must not be negative")
+        if row_count is not None and row_count < 0:
+            raise ValueError("Archive row count must not be negative")
+        with self._connection:
+            cursor = self._connection.execute(
+                """UPDATE archive_manifest SET
+                       checksum_sha256=COALESCE(?, checksum_sha256),
+                       size_bytes=COALESCE(?, size_bytes),
+                       row_count=COALESCE(?, row_count),
+                       status=?, imported_at=COALESCE(?, imported_at),
+                       error=?, updated_at=CURRENT_TIMESTAMP
+                   WHERE archive_url=?""",
+                (checksum_sha256, size_bytes, row_count, status, imported_at, error, archive_url),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
+
+    def archive_manifest_summary(
+        self,
+        *,
+        exchange_id: str | None = None,
+        market_type: str | None = None,
+        data_type: str | None = None,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return auditable archive states, optionally filtered by dataset identity."""
+        clauses: list[str] = []
+        values: list[str] = []
+        for column, value in (
+            ("exchange_id", exchange_id), ("market_type", market_type),
+            ("data_type", data_type), ("symbol", symbol),
+        ):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                values.append(value)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._connection.execute(
+            """SELECT archive_url, exchange_id, market_type, data_type, symbol, archive_period,
+                      checksum_sha256, size_bytes, row_count, status, imported_at, error, updated_at
+               FROM archive_manifest""" + where + " ORDER BY market_type, data_type, symbol, archive_period, archive_url",
+            values,
+        ).fetchall()
+        keys = ("archive_url", "exchange_id", "market_type", "data_type", "symbol",
+                "archive_period", "checksum_sha256", "size_bytes", "row_count", "status",
+                "imported_at", "error", "updated_at")
+        return [dict(zip(keys, row, strict=True)) for row in rows]
 
     def dataset_summary(self) -> list[dict[str, Any]]:
         """Include attempted datasets even when their first request yielded no records."""
