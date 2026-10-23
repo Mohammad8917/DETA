@@ -111,6 +111,9 @@ def test_kline_import_marks_manifest_failed_when_archive_verification_fails(
 class FakeDerivativesSource(FakeSource):
     market_type = "usd_m"
 
+    def __init__(self, market: str) -> None:
+        super().__init__()
+
 
 class FakeFundingArchive(FakeArchive):
     def list_monthly_funding_rate_archives(
