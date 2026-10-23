@@ -59,6 +59,28 @@ class FakeArchive:
             )
         ]
 
+    def list_monthly_price_kline_archives(
+        self, symbol: str, interval: str, price_type: str,
+        start_month: str | None = None, end_month: str | None = None,
+    ) -> list[str]:
+        return [
+            f"https://data.binance.vision/data/futures/um/monthly/{price_type}Klines/"
+            f"{symbol}/{interval}/{symbol}-{interval}-2024-01.zip"
+        ]
+
+    def fetch_price_kline_archive(self, url: str, price_type: str) -> list[DataRecord]:
+        if self.should_fail:
+            raise ValueError("checksum mismatch")
+        self.last_verified_checksum_sha256 = hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+        self.last_verified_size_bytes = len(ARCHIVE_BYTES)
+        return [
+            DataRecord(
+                "binance", "usd_m", f"{price_type}_klines_1m", "BTCUSDT",
+                1704067200000, "1704067200000",
+                {"close": "2", "archive_url": url},
+            )
+        ]
+
     def close(self) -> None:
         pass
 
@@ -204,3 +226,51 @@ def test_trade_import_records_verified_manifest_after_save(
         assert manifest[0]["size_bytes"] == len(ARCHIVE_BYTES)
         assert manifest[0]["row_count"] == 1
         assert manifest[0]["imported_at"]
+
+
+def test_price_kline_import_records_verified_manifest_after_save(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceDerivativesAdapter", FakeDerivativesSource)
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchive)
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        result = cli._backfill_archive_price_klines(
+            store, "usd-m", "markPrice", ["BTCUSDT"], ["1m"], "2024-01", "2024-01"
+        )
+        assert result == 0
+        manifest = store.archive_manifest_summary(
+            exchange_id="binance", market_type="usd_m",
+            data_type="mark_price_klines_1m", symbol="BTCUSDT",
+        )
+        assert len(manifest) == 1
+        assert manifest[0]["status"] == "imported"
+        assert manifest[0]["checksum_sha256"] == hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+        assert manifest[0]["size_bytes"] == len(ARCHIVE_BYTES)
+        assert manifest[0]["row_count"] == 1
+        assert manifest[0]["imported_at"]
+
+
+def test_price_kline_import_marks_manifest_failed_on_archive_verification_failure(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceDerivativesAdapter", FakeDerivativesSource)
+
+    class FailingPriceArchive(FakeArchive):
+        def __init__(self, market: str) -> None:
+            super().__init__(market)
+            self.should_fail = True
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FailingPriceArchive)
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        result = cli._backfill_archive_price_klines(
+            store, "usd-m", "markPrice", ["BTCUSDT"], ["1m"], "2024-01", "2024-01"
+        )
+        assert result == 1
+        manifest = store.archive_manifest_summary(
+            exchange_id="binance", market_type="usd_m",
+            data_type="mark_price_klines_1m", symbol="BTCUSDT",
+        )
+        assert len(manifest) == 1
+        assert manifest[0]["status"] == "failed"
+        assert "checksum mismatch" in manifest[0]["error"]
+        assert manifest[0]["imported_at"] is None
