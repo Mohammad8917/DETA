@@ -68,7 +68,7 @@ class SQLiteStore:
                     metadata["status"] = "NOT_PRESENT_IN_LATEST_DISCOVERY"
                     metadata["is_currently_listed"] = False
                     self._connection.execute(
-                        """UPDATE symbols SET metadata_json=?, discovered_at=CURRENT_TIMESTAMP
+                        """UPDATE symbols SET metadata_json=?
                            WHERE exchange_id=? AND market_type=? AND symbol=?""",
                         (json.dumps(metadata, ensure_ascii=False, sort_keys=True),
                          exchange_id, market_type, symbol),

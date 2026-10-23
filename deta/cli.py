@@ -113,24 +113,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                     symbol = str(item["symbol"])
                     data_type = "agg_trades"
                     checkpoint = store.get_checkpoint("binance", "spot", data_type, symbol)
-                    start_id = int(checkpoint) if checkpoint is not None else None
+                    cursor_id = int(checkpoint) if checkpoint is not None else None
+                    symbol_pages = 0
                     try:
                         for page in adapter.iter_aggregate_trades(
-                            symbol, args.start_ms, args.end_ms, start_id
+                            symbol, args.start_ms, args.end_ms, cursor_id
                         ):
                             last_id = max(int(record.record_key) for record in page)
-                            inserted = store.save_batch(page, cursor=str(last_id + 1), status="partial",
+                            cursor_id = last_id + 1
+                            inserted = store.save_batch(page, cursor=str(cursor_id), status="partial",
                                 detail="Aggregate trades paged and persisted; historical coverage has not been independently verified")
                             pages_saved += 1
+                            symbol_pages += 1
                             rows_saved += inserted
-                        if checkpoint is None and pages_saved == 0:
+                        if symbol_pages == 0 and checkpoint is None:
                             store.update_checkpoint("binance", "spot", data_type, symbol, None,
                                 "partial", "No rows returned; earliest availability not proven")
                         log.info("%s aggregate trades: backfill pass finished", symbol)
                     except Exception as exc:
                         failed += 1
                         store.update_checkpoint("binance", "spot", data_type, symbol,
-                            checkpoint, "failed", f"{type(exc).__name__}: {exc}")
+                            str(cursor_id) if cursor_id is not None else checkpoint,
+                            "failed", f"{type(exc).__name__}: {exc}")
                         log.exception("Failed aggregate-trade dataset %s", symbol)
                 print(json.dumps({"exchange": "binance", "market_type": "spot",
                     "symbols_attempted": len(symbols), "pages_saved": pages_saved,
