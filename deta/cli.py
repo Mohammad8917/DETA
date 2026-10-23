@@ -6,7 +6,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Sequence
+from typing import Literal, Sequence
 
 from deta.exchanges.binance import BinanceSpotAdapter
 from deta.exchanges.binance.archive import BinanceArchiveAdapter
@@ -53,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     archive_trades.add_argument("--symbols", nargs="*", help="Optional symbols/contracts; otherwise use all locally known")
     archive_trades.add_argument("--start-month", help="Optional inclusive YYYY-MM archive month")
     archive_trades.add_argument("--end-month", help="Optional inclusive YYYY-MM archive month")
+    raw_trades = commands.add_parser(
+        "backfill-archive-trades",
+        help="Import Binance official monthly individual-trade ZIP archives",
+    )
+    raw_trades.add_argument("--market", choices=("spot", "usd-m", "coin-m"), required=True)
+    raw_trades.add_argument("--symbols", nargs="*", help="Optional symbols/contracts; otherwise use all locally known")
+    raw_trades.add_argument("--start-month", help="Optional inclusive YYYY-MM archive month")
+    raw_trades.add_argument("--end-month", help="Optional inclusive YYYY-MM archive month")
     commands.add_parser("status", help="Show locally stored dataset coverage/status")
     return parser
 
@@ -175,12 +183,13 @@ def _backfill_archive_klines(
 
 
 
-def _backfill_archive_agg_trades(
+def _backfill_archive_trade_dataset(
     store: SQLiteStore,
     market: str,
     requested_symbols: list[str] | None,
     start_month: str | None,
     end_month: str | None,
+    dataset: Literal["trades", "agg_trades"],
 ) -> int:
     log = logging.getLogger("deta")
     if market == "spot":
@@ -202,54 +211,90 @@ def _backfill_archive_agg_trades(
         failed = archives_seen = batches_saved = rows_saved = 0
         for item in selected:
             symbol = str(item["symbol"])
-            data_type = "agg_trades"
             try:
-                urls = archive.list_monthly_agg_trade_archives(
-                    symbol, start_month=start_month, end_month=end_month
-                )
+                if dataset == "agg_trades":
+                    urls = archive.list_monthly_agg_trade_archives(
+                        symbol, start_month=start_month, end_month=end_month
+                    )
+                    fetch_archive = archive.fetch_agg_trade_archive
+                    description = "aggregate-trade"
+                else:
+                    urls = archive.list_monthly_trade_archives(
+                        symbol, start_month=start_month, end_month=end_month
+                    )
+                    fetch_archive = archive.fetch_trade_archive
+                    description = "individual-trade"
                 if not urls:
-                    cursor = store.get_checkpoint("binance", market_type, data_type, symbol)
+                    cursor = store.get_checkpoint("binance", market_type, dataset, symbol)
                     store.update_checkpoint(
-                        "binance", market_type, data_type, symbol, cursor, "partial",
-                        "No matching official monthly aggregate-trade archives were listed; coverage is unknown",
+                        "binance", market_type, dataset, symbol, cursor, "partial",
+                        f"No matching official monthly {description} archives were listed; coverage is unknown",
                     )
                     continue
                 for url in urls:
-                    records = archive.fetch_agg_trade_archive(url)
+                    records = fetch_archive(url)
                     archives_seen += 1
                     if not records:
                         continue
-                    last_id = max(int(record.record_key) for record in records)
-                    cursor = str(last_id + 1)
+                    if dataset == "agg_trades":
+                        cursor = str(max(int(record.record_key) for record in records) + 1)
+                    else:
+                        cursor = str(max(int(record.record_key) for record in records) + 1)
                     inserted = store.save_batch(
                         records, cursor=cursor, status="partial",
-                        detail="Official aggregate-trade archives imported; source coverage and gaps are not yet independently verified",
+                        detail=f"Official {description} archives imported; source coverage and gaps are not yet independently verified",
                     )
                     batches_saved += 1
                     rows_saved += inserted
-                log.info("%s aggregate trades: imported %s official archives", symbol, len(urls))
+                log.info("%s %s: imported %s official archives", symbol, description, len(urls))
             except Exception as exc:
                 failed += 1
-                cursor = store.get_checkpoint("binance", market_type, data_type, symbol)
+                cursor = store.get_checkpoint("binance", market_type, dataset, symbol)
                 store.update_checkpoint(
-                    "binance", market_type, data_type, symbol, cursor, "failed",
+                    "binance", market_type, dataset, symbol, cursor, "failed",
                     f"{type(exc).__name__}: {exc}",
                 )
-                log.exception("Failed aggregate-trade archive dataset %s", symbol)
+                log.exception("Failed %s archive dataset %s", dataset, symbol)
         print(json.dumps({
             "exchange": "binance",
             "market_type": market_type,
+            "dataset": dataset,
             "symbols_attempted": len(selected),
             "archives_imported": archives_seen,
             "batches_saved": batches_saved,
             "new_rows_saved": rows_saved,
             "datasets_failed": failed,
-            "note": "Archive import does not prove complete coverage; source checksums and gap reconciliation remain separate verification steps.",
+            "note": "Archive import does not prove complete coverage; checksum verification and gap reconciliation remain separate verification steps.",
         }, indent=2))
         return 1 if failed else 0
     finally:
         source.close()
         archive.close()
+
+
+def _backfill_archive_agg_trades(
+    store: SQLiteStore,
+    market: str,
+    requested_symbols: list[str] | None,
+    start_month: str | None,
+    end_month: str | None,
+) -> int:
+    return _backfill_archive_trade_dataset(
+        store, market, requested_symbols, start_month, end_month, "agg_trades"
+    )
+
+
+def _backfill_archive_trades(
+    store: SQLiteStore,
+    market: str,
+    requested_symbols: list[str] | None,
+    start_month: str | None,
+    end_month: str | None,
+) -> int:
+    return _backfill_archive_trade_dataset(
+        store, market, requested_symbols, start_month, end_month, "trades"
+    )
+
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -269,6 +314,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if args.command == "backfill-archive-agg-trades":
             return _backfill_archive_agg_trades(
+                store, args.market, args.symbols, args.start_month, args.end_month
+            )
+        if args.command == "backfill-archive-trades":
+            return _backfill_archive_trades(
                 store, args.market, args.symbols, args.start_month, args.end_month
             )
         if args.command in ("discover-derivatives", "backfill-derivative-klines"):
