@@ -226,7 +226,7 @@ class SQLiteStore:
         imported_at: str | None = None,
         error: str = "",
     ) -> None:
-        """Update an already inventoried archive; fail rather than silently create an orphan."""
+        """Update an inventoried archive and invalidate stale import evidence on checksum change."""
         allowed = {"discovered", "downloaded", "verified", "imported", "failed", "missing", "unavailable"}
         if status not in allowed:
             raise ValueError(f"Unsupported archive manifest status: {status}")
@@ -240,15 +240,41 @@ class SQLiteStore:
         if row_count is not None and row_count < 0:
             raise ValueError("Archive row count must not be negative")
         with self._connection:
+            existing = self._connection.execute(
+                "SELECT checksum_sha256, status, imported_at FROM archive_manifest WHERE archive_url=?",
+                (archive_url,),
+            ).fetchone()
+            if existing is None:
+                raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
+            previous_checksum, previous_status, previous_imported_at = existing
+            checksum_changed = (
+                checksum_sha256 is not None
+                and previous_checksum is not None
+                and checksum_sha256.lower() != previous_checksum.lower()
+            )
+            # A changed archive is a different content version. Old import evidence must
+            # not survive that change, even if the caller accidentally supplies an old timestamp.
+            effective_imported_at = None if checksum_changed else (
+                imported_at if imported_at is not None else previous_imported_at
+            )
+            effective_status = status
+            if previous_status == "imported" and not checksum_changed and status in {
+                "discovered", "downloaded", "verified"
+            }:
+                # Re-discovery/re-download/re-verification is not itself proof that the
+                # already-imported, checksum-identical archive ceased to be imported.
+                effective_status = "imported"
+            if checksum_changed and status == "imported":
+                raise ValueError("A changed archive checksum must be verified before it can be marked imported")
             cursor = self._connection.execute(
                 """UPDATE archive_manifest SET
                        checksum_sha256=COALESCE(?, checksum_sha256),
                        size_bytes=COALESCE(?, size_bytes),
                        row_count=COALESCE(?, row_count),
-                       status=?, imported_at=COALESCE(?, imported_at),
-                       error=?, updated_at=CURRENT_TIMESTAMP
+                       status=?, imported_at=?, error=?, updated_at=CURRENT_TIMESTAMP
                    WHERE archive_url=?""",
-                (checksum_sha256, size_bytes, row_count, status, imported_at, error, archive_url),
+                (checksum_sha256, size_bytes, row_count, effective_status,
+                 effective_imported_at, error, archive_url),
             )
             if cursor.rowcount != 1:
                 raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
