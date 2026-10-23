@@ -99,6 +99,12 @@ class BinanceSpotAdapter:
                 return
             cursor = next_cursor
 
+    def fetch_klines(self, symbol: str, interval: str, start_ms: int,
+                     end_ms: int | None = None) -> list[DataRecord]:
+        """Convenience method for small tests; production backfills should use iter_klines."""
+        return [record for page in self.iter_klines(symbol, interval, start_ms, end_ms)
+                for record in page]
+
     def iter_aggregate_trades(
         self, symbol: str, start_ms: int = 0, end_ms: int | None = None,
         start_id: int | None = None,
