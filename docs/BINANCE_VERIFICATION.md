@@ -12,12 +12,12 @@ This file is the source of truth for which Binance DETA behaviours are frozen an
 
 ## Current evidence snapshot
 
-Repository revision assessed for this ledger: `5bf6064c893dbcc59b36596f076240f2ff7e67a7` (2026-10-23).
+Repository revision assessed for the current unit-test snapshot: `439dfdf67c0379ee7737197b2835e716433304b7` (2026-10-23).
 
-The GitHub Actions test workflow for that revision completed successfully:
-https://github.com/Mohammad8917/DETA/actions/runs/40032878623
+The GitHub Actions test workflow for the S3 archive-discovery fallback completed successfully:
+https://github.com/Mohammad8917/DETA/actions/runs/40033620300
 
-This is test-suite evidence only. It is not a live Binance end-to-end run.
+This is unit-test/CI evidence only. It is not a live Binance end-to-end run. Later repository documentation and discoverability commits also passed CI, but those runs do not prove additional Binance source coverage.
 
 ## Locked contracts — current scope only
 
@@ -43,6 +43,10 @@ The following contracts are frozen at the **unit-tested implementation level**. 
    - Missing, unsupported, failed, partial, and verified-complete coverage must remain distinguishable.
 
 These contracts may be changed only with an explicit, reviewed change and updated tests. A source-specific correction must preserve the contract unless evidence shows the contract itself is wrong.
+
+## Newly verified at unit-test level
+
+- **S3 archive-listing fallback:** the regression test for falling back from an HTML directory page with no usable archive links to an S3 `ListObjectsV2` response passed in CI at `439dfdf`. This verifies the mocked fallback path and symbol-prefix parsing only; it does not prove live endpoint availability, full pagination behaviour against Binance, or exhaustive historical symbol discovery.
 
 ## Implemented but NOT yet locked as proven
 
