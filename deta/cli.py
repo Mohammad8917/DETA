@@ -124,8 +124,14 @@ def _backfill_archive_klines(
         exchange_id, market_type = "binance", source.market_type
     archive = BinanceArchiveAdapter(market)
     try:
-        discovered = source.discover_symbols()
-        store.save_symbols(discovered)
+        try:
+            discovered = source.discover_symbols()
+            if discovered:
+                store.save_symbols(discovered)
+            else:
+                log.warning("Current market discovery returned no symbols; continuing with archive indexes")
+        except Exception as exc:
+            log.warning("Current market discovery failed; continuing with archive indexes: %s", exc)
         stored_symbols = store.get_symbols(exchange_id, market_type)
         if requested_symbols:
             known = {str(item["symbol"]) for item in stored_symbols}
@@ -227,7 +233,14 @@ def _backfill_archive_trade_dataset(
         market_type = source.market_type
     archive = BinanceArchiveAdapter(market)
     try:
-        store.save_symbols(source.discover_symbols())
+        try:
+            discovered = source.discover_symbols()
+            if discovered:
+                store.save_symbols(discovered)
+            else:
+                log.warning("Current market discovery returned no symbols; continuing with archive indexes")
+        except Exception as exc:
+            log.warning("Current market discovery failed; continuing with archive indexes: %s", exc)
         stored_symbols = store.get_symbols("binance", market_type)
         if requested_symbols:
             by_symbol = {str(item["symbol"]): item for item in stored_symbols}
