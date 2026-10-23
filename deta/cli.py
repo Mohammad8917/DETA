@@ -94,7 +94,7 @@ def _select_symbols(
 
 def _archive_month(url: str) -> str:
     name = url.rstrip("/").rsplit("/", 1)[-1]
-    match = re.search(r"-(\\d{4}-\\d{2})(?:-\\d{2})?\\.zip$", name)
+    match = re.search(r"-(\d{4}-\d{2})(?:-\d{2})?\.zip$", name)
     if match is None:
         raise ValueError(f"Cannot determine archive month from filename: {name}")
     return match.group(1)
