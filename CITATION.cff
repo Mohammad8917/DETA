@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use DETA in research or software, please cite the repository."
+type: software
+title: "DETA: Historical Exchange Market Data Collection Platform"
+authors:
+  - family-names: "Zadeh"
+    given-names: "Mohammad Hassan"
+repository-code: "https://github.com/Mohammad8917/DETA"
+license: MIT
+keywords:
+  - historical market data
+  - cryptocurrency
+  - Binance
+  - OHLCV
+  - exchange archives
+  - Python
