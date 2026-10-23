@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
 import time
@@ -79,6 +80,8 @@ class BinanceArchiveAdapter:
                     continue
                 if response.status_code == 404 and allow_not_found:
                     return response
+                if 400 <= response.status_code < 500:
+                    raise RuntimeError(f"HTTP {response.status_code} for {url}")
                 response.raise_for_status()
                 if self.request_pause:
                     time.sleep(self.request_pause)
@@ -175,11 +178,11 @@ class BinanceArchiveAdapter:
         return [url for _, url in sorted(set(found), key=lambda item: item[0])]
 
     def fetch_agg_trade_archive(self, url: str) -> list[DataRecord]:
-        """Download and normalize one official monthly aggregate-trade ZIP archive."""
-        response = self._get(url)
+        """Download, checksum-verify, and normalize one monthly aggregate-trade ZIP."""
+        archive_bytes = self._get_verified_archive(url)
         symbol = self._agg_trade_archive_symbol(url)
         try:
-            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
                 csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
                 if len(csv_names) != 1:
                     raise ValueError(
@@ -202,9 +205,10 @@ class BinanceArchiveAdapter:
                             trade_id = int(row[0])
                             first_trade_id = int(row[3])
                             last_trade_id = int(row[4])
-                            timestamp = int(row[5])
+                            source_timestamp = int(row[5])
                         except ValueError as exc:
                             raise ValueError(f"Invalid numeric fields in {url}") from exc
+                        timestamp, timestamp_unit = self._normalize_timestamp(source_timestamp)
                         payload: dict[str, Any] = {
                             "aggregate_trade_id": trade_id,
                             "price": row[1],
@@ -212,6 +216,8 @@ class BinanceArchiveAdapter:
                             "first_trade_id": first_trade_id,
                             "last_trade_id": last_trade_id,
                             "timestamp_ms": timestamp,
+                            "source_timestamp": source_timestamp,
+                            "source_timestamp_unit": timestamp_unit,
                             "is_buyer_maker": row[6].strip().lower() in {"true", "1"},
                             "is_best_match": (
                                 row[7].strip().lower() in {"true", "1"} if len(row) > 7 else None
@@ -236,10 +242,10 @@ class BinanceArchiveAdapter:
         return match.group(1)
 
     def fetch_kline_archive(self, url: str) -> list[DataRecord]:
-        """Download one monthly ZIP and parse its CSV rows without changing native values."""
-        response = self._get(url)
+        """Download, checksum-verify, and parse one monthly native kline ZIP."""
+        archive_bytes = self._get_verified_archive(url)
         try:
-            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
                 csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
                 if len(csv_names) != 1:
                     raise ValueError(
@@ -259,16 +265,20 @@ class BinanceArchiveAdapter:
                                 f"Malformed kline row in {url}: expected at least 12 columns"
                             )
                         try:
-                            open_time = int(row[0])
-                            close_time = int(row[6])
+                            source_open_time = int(row[0])
+                            source_close_time = int(row[6])
                             trade_count = int(row[8])
                         except ValueError as exc:
                             raise ValueError(f"Invalid numeric fields in {url}") from exc
-                        symbol_interval = self._archive_identity(url)
-                        symbol, interval = symbol_interval
+                        open_time, timestamp_unit = self._normalize_timestamp(source_open_time)
+                        close_time, _ = self._normalize_timestamp(source_close_time)
+                        symbol, interval = self._archive_identity(url)
                         payload: dict[str, Any] = {
                             "interval": interval,
                             "open_time_ms": open_time,
+                            "source_open_time": source_open_time,
+                            "source_close_time": source_close_time,
+                            "source_timestamp_unit": timestamp_unit,
                             "open": row[1],
                             "high": row[2],
                             "low": row[3],
@@ -289,6 +299,30 @@ class BinanceArchiveAdapter:
                     return records
         except zipfile.BadZipFile as exc:
             raise ValueError(f"Invalid ZIP archive: {url}") from exc
+
+    def _get_verified_archive(self, url: str) -> bytes:
+        """Require the official SHA-256 sidecar before parsing any archive contents."""
+        response = self._get(url)
+        checksum_response = self._get(f"{url}.CHECKSUM")
+        match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_response.text)
+        if match is None:
+            raise ValueError(f"Missing or malformed SHA-256 checksum for archive: {url}")
+        actual = hashlib.sha256(response.content).hexdigest()
+        expected = match.group(1).lower()
+        if actual != expected:
+            raise ValueError(
+                f"SHA-256 mismatch for archive {url}: expected {expected}, got {actual}"
+            )
+        return response.content
+
+    @staticmethod
+    def _normalize_timestamp(source_timestamp: int) -> tuple[int, str]:
+        """Normalize Binance's post-2025 Spot microsecond timestamps to stored milliseconds."""
+        if source_timestamp < 0:
+            raise ValueError("Source timestamp must be non-negative")
+        if source_timestamp >= 100_000_000_000_000:
+            return source_timestamp // 1000, "microseconds"
+        return source_timestamp, "milliseconds"
 
     @staticmethod
     def _archive_identity(url: str) -> tuple[str, str]:
