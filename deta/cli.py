@@ -188,6 +188,7 @@ def _backfill_archive_klines(
             symbol = str(item["symbol"])
             for interval in intervals:
                 data_type = f"klines_{interval}"
+                current_archive_url: str | None = None
                 try:
                     monthly_urls = archive.list_monthly_archives(
                         symbol, interval, start_month=start_month, end_month=end_month
@@ -207,8 +208,24 @@ def _backfill_archive_klines(
                         )
                         continue
                     for url in urls:
+                        current_archive_url = url
+                        store.upsert_archive_manifest(
+                            archive_url=url, exchange_id=exchange_id, market_type=market_type,
+                            data_type=data_type, symbol=symbol, archive_period=_archive_month(url),
+                            status="discovered",
+                        )
                         records = archive.fetch_kline_archive(url)
                         archives_seen += 1
+                        digest = archive.last_verified_checksum_sha256
+                        size_bytes = archive.last_verified_size_bytes
+                        if digest is None or size_bytes is None:
+                            raise RuntimeError(
+                                f"Archive parser returned without verified checksum metadata: {url}"
+                            )
+                        store.update_archive_manifest(
+                            url, status="verified", checksum_sha256=digest,
+                            size_bytes=size_bytes, row_count=len(records), error="",
+                        )
                         if not records:
                             existing_cursor = store.get_checkpoint(exchange_id, market_type, data_type, symbol)
                             store.update_checkpoint(
@@ -224,11 +241,24 @@ def _backfill_archive_klines(
                             records, cursor=cursor, status="partial",
                             detail="Official monthly/daily archives imported; full source coverage and gaps are not yet independently verified",
                         )
+                        store.update_archive_manifest(
+                            url, status="imported", imported_at=__import__("datetime").datetime.now(
+                                __import__("datetime").timezone.utc
+                            ).isoformat(), row_count=len(records), error="",
+                        )
                         pages_saved += 1
                         rows_saved += inserted
                     log.info("%s %s: processed %s official monthly archives", symbol, interval, len(urls))
                 except Exception as exc:
                     failed += 1
+                    if current_archive_url is not None:
+                        try:
+                            store.update_archive_manifest(
+                                current_archive_url, status="failed",
+                                error=f"{type(exc).__name__}: {exc}",
+                            )
+                        except KeyError:
+                            pass
                     checkpoint = store.get_checkpoint(exchange_id, market_type, data_type, symbol)
                     store.update_checkpoint(
                         exchange_id, market_type, data_type, symbol, checkpoint, "failed",
