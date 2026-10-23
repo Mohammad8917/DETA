@@ -433,6 +433,7 @@ def _backfill_archive_price_klines(
             symbol = str(item["symbol"])
             for interval in intervals:
                 data_type = f"{type_names[price_type]}_klines_{interval}"
+                current_archive_url = None
                 try:
                     monthly_urls = archive.list_monthly_price_kline_archives(
                         symbol, interval, price_type, start_month, end_month
@@ -453,7 +454,6 @@ def _backfill_archive_price_klines(
                             "No matching official price-kline archives listed; coverage is unknown",
                         )
                         continue
-                    current_archive_url = None
                     for url in urls:
                         current_archive_url = url
                         store.upsert_archive_manifest(
@@ -490,7 +490,7 @@ def _backfill_archive_price_klines(
                         rows_saved += inserted
                 except Exception as exc:
                     failed += 1
-                    if "current_archive_url" in locals() and current_archive_url is not None:
+                    if current_archive_url is not None:
                         try:
                             store.update_archive_manifest(
                                 current_archive_url, status="failed",
