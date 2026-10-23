@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -242,9 +243,7 @@ def _backfill_archive_klines(
                             detail="Official monthly/daily archives imported; full source coverage and gaps are not yet independently verified",
                         )
                         store.update_archive_manifest(
-                            url, status="imported", imported_at=__import__("datetime").datetime.now(
-                                __import__("datetime").timezone.utc
-                            ).isoformat(), row_count=len(records), error="",
+                            url, status="imported", imported_at=datetime.now(timezone.utc).isoformat(), row_count=len(records), error="",
                         )
                         pages_saved += 1
                         rows_saved += inserted
