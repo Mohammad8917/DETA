@@ -215,3 +215,16 @@ def test_individual_trade_archive_discovery_and_parsing() -> None:
     assert record.payload["quote_or_base_quantity"] == "750.125"
     assert record.payload["is_buyer_maker"] is True
     adapter.close()
+
+
+def test_monthly_interval_alias_uses_official_1mo_archive_name() -> None:
+    directory = (
+        "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1mo/"
+    )
+    listing = '<a href="BTCUSDT-1mo-2024-01.zip">jan</a>'
+    client = MockClient({directory: listing})
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_monthly_archives(
+        "BTCUSDT", "1M", start_month="2024-01", end_month="2024-01"
+    ) == [directory + "BTCUSDT-1mo-2024-01.zip"]
+    adapter.close()
