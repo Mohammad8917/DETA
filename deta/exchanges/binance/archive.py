@@ -68,6 +68,8 @@ class BinanceArchiveAdapter:
         )
         self._owns_client = client is None
         self.request_pause = max(0.0, request_pause)
+        self.last_verified_checksum_sha256: str | None = None
+        self.last_verified_size_bytes: int | None = None
 
     def close(self) -> None:
         if self._owns_client:
@@ -771,6 +773,8 @@ class BinanceArchiveAdapter:
             raise ValueError(
                 f"SHA-256 mismatch for archive {url}: expected {expected}, got {actual}"
             )
+        self.last_verified_checksum_sha256 = actual
+        self.last_verified_size_bytes = len(response.content)
         return response.content
 
     @staticmethod
