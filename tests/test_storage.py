@@ -58,3 +58,65 @@ def test_empty_symbol_discovery_is_rejected_without_mutating_existing_data(tmp_p
         with pytest.raises(ValueError, match="empty discovery"):
             store.save_symbols([])
         assert store.get_symbols("binance", "spot")[0]["symbol"] == "BTCUSDT"
+
+
+def test_archive_manifest_persists_and_filters_states(tmp_path: Path) -> None:
+    path = tmp_path / "data.sqlite3"
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    digest = "a" * 64
+    with SQLiteStore(path) as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256=digest, size_bytes=1024, row_count=31,
+        )
+        store.update_archive_manifest(
+            url, status="imported", imported_at="2026-10-24T00:00:00Z", row_count=31,
+        )
+        # Re-discovery must not silently downgrade an imported archive.
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        rows = store.archive_manifest_summary(
+            exchange_id="binance", market_type="spot", data_type="klines_1m", symbol="BTCUSDT",
+        )
+        assert len(rows) == 1
+        assert rows[0]["status"] == "imported"
+        assert rows[0]["checksum_sha256"] == digest
+        assert rows[0]["size_bytes"] == 1024
+        assert rows[0]["row_count"] == 31
+    with SQLiteStore(path) as reopened:
+        assert reopened.archive_manifest_summary()[0]["status"] == "imported"
+
+
+def test_archive_manifest_rejects_invalid_metadata_and_orphan_updates(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        with pytest.raises(ValueError, match="SHA-256"):
+            store.upsert_archive_manifest(
+                archive_url="https://example.test/a.zip", exchange_id="binance",
+                market_type="spot", data_type="klines_1m", symbol="BTCUSDT",
+                archive_period="2024-01", checksum_sha256="not-a-digest",
+            )
+        with pytest.raises(ValueError, match="must not be negative"):
+            store.upsert_archive_manifest(
+                archive_url="https://example.test/a.zip", exchange_id="binance",
+                market_type="spot", data_type="klines_1m", symbol="BTCUSDT",
+                archive_period="2024-01", size_bytes=-1,
+            )
+        with pytest.raises(KeyError, match="not registered"):
+            store.update_archive_manifest(
+                "https://example.test/missing.zip", status="failed", error="not found",
+            )
+
+
+def test_archive_manifest_rejects_unknown_status(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        with pytest.raises(ValueError, match="Unsupported archive manifest status"):
+            store.upsert_archive_manifest(
+                archive_url="https://example.test/a.zip", exchange_id="binance",
+                market_type="spot", data_type="klines_1m", symbol="BTCUSDT",
+                archive_period="2024-01", status="complete",
+            )
