@@ -105,3 +105,53 @@ def test_kline_import_marks_manifest_failed_when_archive_verification_fails(
         assert manifest[0]["status"] == "failed"
         assert "checksum mismatch" in manifest[0]["error"]
         assert manifest[0]["imported_at"] is None
+
+
+
+class FakeDerivativesSource(FakeSource):
+    market_type = "usd_m"
+
+
+class FakeFundingArchive(FakeArchive):
+    def list_monthly_funding_rate_archives(
+        self, symbol: str, start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> list[str]:
+        return [
+            "https://data.binance.vision/data/futures/um/monthly/fundingRate/"
+            "BTCUSDT/BTCUSDT-fundingRate-2024-01.zip"
+        ]
+
+    def fetch_funding_rate_archive(self, url: str) -> list[DataRecord]:
+        if self.should_fail:
+            raise ValueError("checksum mismatch")
+        self.last_verified_checksum_sha256 = hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+        self.last_verified_size_bytes = len(ARCHIVE_BYTES)
+        return [
+            DataRecord(
+                "binance", "usd_m", "funding_rate", "BTCUSDT", 1704067200000,
+                "1704067200000", {"funding_rate": "0.0001", "archive_url": url},
+            )
+        ]
+
+
+def test_funding_rate_import_records_verified_manifest_after_save(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceDerivativesAdapter", FakeDerivativesSource)
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeFundingArchive)
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        result = cli._backfill_archive_funding_rates(
+            store, "usd-m", ["BTCUSDT"], "2024-01", "2024-01"
+        )
+        assert result == 0
+        manifest = store.archive_manifest_summary(
+            exchange_id="binance", market_type="usd_m", data_type="funding_rate",
+            symbol="BTCUSDT",
+        )
+        assert len(manifest) == 1
+        assert manifest[0]["status"] == "imported"
+        assert manifest[0]["checksum_sha256"] == hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+        assert manifest[0]["size_bytes"] == len(ARCHIVE_BYTES)
+        assert manifest[0]["row_count"] == 1
+        assert manifest[0]["imported_at"]
