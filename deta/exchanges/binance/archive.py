@@ -93,6 +93,28 @@ class BinanceArchiveAdapter:
                 time.sleep(min(30.0, 2**attempt))
         raise RuntimeError(f"Binance archive request failed for {url}: {last_error}") from last_error
 
+    def list_archive_symbols(self, dataset: str) -> list[str]:
+        """Discover symbols from the official monthly archive index, including delisted markets."""
+        folders = {"klines": "klines", "aggTrades": "aggTrades", "trades": "trades"}
+        if dataset not in folders:
+            raise ValueError(f"Unsupported Binance archive dataset index: {dataset}")
+        directory = (
+            f"{self.base_url}/data/{self.archive_market_path}/monthly/{folders[dataset]}/"
+        )
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code == 404:
+            return []
+        parser = _Links()
+        parser.feed(response.text)
+        symbols: set[str] = set()
+        for href in parser.hrefs:
+            if not href.endswith("/"):
+                continue
+            name = href.rstrip("/").rsplit("/", 1)[-1]
+            if name and re.fullmatch(r"[A-Za-z0-9_]+", name):
+                symbols.add(name)
+        return sorted(symbols)
+
     def list_monthly_archives(
         self, symbol: str, interval: str, start_month: str | None = None,
         end_month: str | None = None,
