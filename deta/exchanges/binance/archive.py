@@ -103,6 +103,7 @@ class BinanceArchiveAdapter:
         folders = {
             "klines": "klines", "aggTrades": "aggTrades", "trades": "trades",
             **{key: key for key in self.price_kline_types},
+            "fundingRate": "fundingRate",
         }
         if dataset not in folders:
             raise ValueError(f"Unsupported Binance archive dataset index: {dataset}")
@@ -242,6 +243,118 @@ class BinanceArchiveAdapter:
             return date.fromisoformat(f"{value}-01")
         except ValueError as exc:
             raise ValueError(f"Invalid month: {value}") from exc
+
+    def list_monthly_funding_rate_archives(
+        self, symbol: str, start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> list[str]:
+        """List official monthly Futures funding-rate archives for a contract."""
+        if self.market == "spot":
+            raise ValueError("Funding-rate archives are not available for Spot")
+        if not symbol or "/" in symbol or "\\" in symbol:
+            raise ValueError("Invalid symbol for archive path")
+        start = self._parse_month(start_month) if start_month else None
+        end = self._parse_month(end_month) if end_month else None
+        if start and end and start > end:
+            raise ValueError("start_month must not be later than end_month")
+        directory = (
+            f"{self.base_url}/data/{self.archive_market_path}/monthly/fundingRate/{symbol}/"
+        )
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code == 404:
+            return []
+        parser = _Links()
+        parser.feed(response.text)
+        pattern = re.compile(
+            rf"^{re.escape(symbol)}-fundingRate-(\d{{4}}-\d{{2}})\.zip$"
+        )
+        found: list[tuple[date, str]] = []
+        for href in parser.hrefs:
+            name = href.rstrip("/").rsplit("/", 1)[-1]
+            match = pattern.fullmatch(name)
+            if not match:
+                continue
+            month = self._parse_month(match.group(1))
+            if start and month < start:
+                continue
+            if end and month > end:
+                continue
+            found.append((month, urljoin(directory, href)))
+        return [url for _, url in sorted(set(found), key=lambda item: item[0])]
+
+    def fetch_funding_rate_archive(self, url: str) -> list[DataRecord]:
+        """Download, checksum-verify, and parse one official Futures funding-rate ZIP."""
+        if self.market == "spot":
+            raise ValueError("Funding-rate archives are not available for Spot")
+        archive_bytes = self._get_verified_archive(url)
+        symbol = url.rstrip("/").rsplit("/", 1)[-1].split("-fundingRate-", 1)[0]
+        try:
+            with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+                csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+                if len(csv_names) != 1:
+                    raise ValueError(
+                        f"Expected exactly one CSV in archive {url}, found {len(csv_names)}"
+                    )
+                with archive.open(csv_names[0]) as binary:
+                    reader = csv.reader(io.TextIOWrapper(binary, encoding="utf-8-sig", newline=""))
+                    rows = iter(reader)
+                    first_row = next(rows, None)
+                    if first_row is None:
+                        return []
+                    header: dict[str, int] | None = None
+                    normalized = [value.strip().lower().replace(" ", "_") for value in first_row]
+                    if any(value in {"calc_time", "funding_time", "fundingtime"} for value in normalized):
+                        header = {value: index for index, value in enumerate(normalized)}
+                        data_rows = rows
+                    else:
+                        data_rows = iter([first_row, *rows])
+                    records: list[DataRecord] = []
+                    for row in data_rows:
+                        if not row:
+                            continue
+                        try:
+                            if header is not None:
+                                time_index = next(
+                                    header[key] for key in ("calc_time", "funding_time", "fundingtime")
+                                    if key in header
+                                )
+                                rate_index = next(
+                                    header[key] for key in ("last_funding_rate", "funding_rate", "fundingrate")
+                                    if key in header
+                                )
+                                timestamp = int(row[time_index])
+                                rate = row[rate_index]
+                                interval_index = header.get("funding_interval_hours")
+                                interval_hours = row[interval_index] if interval_index is not None else None
+                                symbol_index = header.get("symbol")
+                                if symbol_index is not None and row[symbol_index]:
+                                    symbol = row[symbol_index]
+                            elif row[0].strip().upper() == symbol.upper() and len(row) >= 4:
+                                timestamp = int(row[1])
+                                interval_hours = row[2]
+                                rate = row[3]
+                            elif len(row) >= 3:
+                                timestamp = int(row[0])
+                                interval_hours = row[1]
+                                rate = row[2]
+                            else:
+                                raise ValueError("Expected at least three funding-rate columns")
+                        except (ValueError, StopIteration, IndexError) as exc:
+                            raise ValueError(f"Malformed funding-rate row in {url}: {row}") from exc
+                        payload: dict[str, Any] = {
+                            "funding_time_ms": timestamp,
+                            "funding_interval_hours": interval_hours,
+                            "last_funding_rate": rate,
+                            "source": "binance_official_bulk_archive",
+                            "archive_url": url,
+                        }
+                        records.append(DataRecord(
+                            "binance", self.market_type, "funding_rate", symbol,
+                            timestamp, str(timestamp), payload,
+                        ))
+                    return records
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"Invalid ZIP archive: {url}") from exc
 
     def list_monthly_price_kline_archives(
         self, symbol: str, interval: str, price_type: str,
