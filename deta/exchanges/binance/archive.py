@@ -39,6 +39,11 @@ class BinanceArchiveAdapter:
         "usd-m": ("futures/um", "binance_usd_m_futures"),
         "coin-m": ("futures/cm", "binance_coin_m_futures"),
     }
+    price_kline_types = {
+        "markPriceKlines": "markPrice",
+        "indexPriceKlines": "indexPrice",
+        "premiumIndexKlines": "premiumIndex",
+    }
     candle_intervals = (
         "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h",
         "12h", "1d", "3d", "1w", "1M",
@@ -95,7 +100,10 @@ class BinanceArchiveAdapter:
 
     def list_archive_symbols(self, dataset: str, frequency: str = "monthly") -> list[str]:
         """Discover symbols from official monthly/daily archive indexes, including delisted markets."""
-        folders = {"klines": "klines", "aggTrades": "aggTrades", "trades": "trades"}
+        folders = {
+            "klines": "klines", "aggTrades": "aggTrades", "trades": "trades",
+            **{key: key for key in self.price_kline_types},
+        }
         if dataset not in folders:
             raise ValueError(f"Unsupported Binance archive dataset index: {dataset}")
         if frequency not in {"monthly", "daily"}:
@@ -125,27 +133,38 @@ class BinanceArchiveAdapter:
         start_month: str | None = None, end_month: str | None = None,
     ) -> list[str]:
         """Return official daily archives for a dataset, optionally bounded by month."""
-        if dataset not in {"klines", "aggTrades", "trades"}:
+        allowed = {"klines", "aggTrades", "trades", *self.price_kline_types}
+        if dataset not in allowed:
             raise ValueError(f"Unsupported Binance daily archive dataset: {dataset}")
         if not symbol or "/" in symbol or "\\" in symbol:
             raise ValueError("Invalid symbol for archive path")
-        if dataset == "klines":
+        if dataset == "klines" or dataset in self.price_kline_types:
             if interval not in self.candle_intervals:
-                raise ValueError(f"Unsupported Binance kline interval: {interval}")
+                raise ValueError(f"Unsupported kline interval: {interval}")
             archive_interval = "1mo" if interval == "1M" else interval
-            directory = (
-                f"{self.base_url}/data/{self.archive_market_path}/daily/klines/"
-                f"{symbol}/{archive_interval}/"
-            )
+            if dataset == "klines":
+                directory = (
+                    f"{self.base_url}/data/{self.archive_market_path}/daily/klines/"
+                    f"{symbol}/{archive_interval}/"
+                )
+                filename_prefix = f"{symbol}-{archive_interval}"
+            else:
+                if self.market == "spot":
+                    raise ValueError("Futures price kline archives are not available for Spot")
+                directory = (
+                    f"{self.base_url}/data/{self.archive_market_path}/daily/{dataset}/"
+                    f"{symbol}/{archive_interval}/"
+                )
+                filename_prefix = f"{symbol}-{self.price_kline_types[dataset]}-{archive_interval}"
             pattern = re.compile(
-                rf"^{re.escape(symbol)}-{re.escape(archive_interval)}-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$"
+                rf"^{re.escape(filename_prefix)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
             )
         else:
             directory = (
                 f"{self.base_url}/data/{self.archive_market_path}/daily/{dataset}/{symbol}/"
             )
             pattern = re.compile(
-                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$"
+                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
             )
         start = self._parse_month(start_month) if start_month else None
         end = self._parse_month(end_month) if end_month else None
@@ -223,6 +242,117 @@ class BinanceArchiveAdapter:
             return date.fromisoformat(f"{value}-01")
         except ValueError as exc:
             raise ValueError(f"Invalid month: {value}") from exc
+
+    def list_monthly_price_kline_archives(
+        self, symbol: str, interval: str, price_type: str,
+        start_month: str | None = None, end_month: str | None = None,
+    ) -> list[str]:
+        """List official monthly Futures mark/index/premium-price candle archives."""
+        if self.market == "spot":
+            raise ValueError("Futures price kline archives are not available for Spot")
+        if price_type not in {"markPrice", "indexPrice", "premiumIndex"}:
+            raise ValueError(f"Unsupported Futures price kline type: {price_type}")
+        if interval not in self.candle_intervals:
+            raise ValueError(f"Unsupported kline interval: {interval}")
+        folder = f"{price_type}Klines"
+        archive_interval = "1mo" if interval == "1M" else interval
+        directory = (
+            f"{self.base_url}/data/{self.archive_market_path}/monthly/{folder}/"
+            f"{symbol}/{archive_interval}/"
+        )
+        start = self._parse_month(start_month) if start_month else None
+        end = self._parse_month(end_month) if end_month else None
+        if start and end and start > end:
+            raise ValueError("start_month must not be later than end_month")
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code == 404:
+            return []
+        parser = _Links()
+        parser.feed(response.text)
+        pattern = re.compile(
+            rf"^{re.escape(symbol)}-{re.escape(price_type)}-{re.escape(archive_interval)}-(\\d{{4}}-\\d{{2}})\\.zip$"
+        )
+        found: list[tuple[date, str]] = []
+        for href in parser.hrefs:
+            name = href.rstrip("/").rsplit("/", 1)[-1]
+            match = pattern.fullmatch(name)
+            if not match:
+                continue
+            month = self._parse_month(match.group(1))
+            if start and month < start:
+                continue
+            if end and month > end:
+                continue
+            found.append((month, urljoin(directory, href)))
+        return [url for _, url in sorted(set(found), key=lambda item: item[0])]
+
+    def fetch_price_kline_archive(self, url: str, price_type: str) -> list[DataRecord]:
+        """Download and checksum-verify a Futures mark/index/premium-price candle archive."""
+        if self.market == "spot":
+            raise ValueError("Futures price kline archives are not available for Spot")
+        type_names = {
+            "markPrice": "mark_price",
+            "indexPrice": "index_price",
+            "premiumIndex": "premium_index",
+        }
+        if price_type not in type_names:
+            raise ValueError(f"Unsupported Futures price kline type: {price_type}")
+        archive_bytes = self._get_verified_archive(url)
+        parts = url.split("?", 1)[0].rstrip("/").split("/")
+        if len(parts) < 3:
+            raise ValueError(f"Cannot infer symbol and interval from archive URL: {url}")
+        symbol, archive_interval = parts[-3], parts[-2]
+        interval = "1M" if archive_interval == "1mo" else archive_interval
+        try:
+            with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+                csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+                if len(csv_names) != 1:
+                    raise ValueError(
+                        f"Expected exactly one CSV in archive {url}, found {len(csv_names)}"
+                    )
+                with archive.open(csv_names[0]) as binary:
+                    reader = csv.reader(io.TextIOWrapper(binary, encoding="utf-8-sig", newline=""))
+                    records: list[DataRecord] = []
+                    for row in reader:
+                        if not row:
+                            continue
+                        if row[0].strip().lower() in {"open_time", "open time"}:
+                            continue
+                        if len(row) < 7:
+                            raise ValueError(
+                                f"Malformed price kline row in {url}: expected at least 7 columns"
+                            )
+                        try:
+                            source_open_time = int(row[0])
+                            source_close_time = int(row[6])
+                        except ValueError as exc:
+                            raise ValueError(f"Invalid numeric fields in {url}") from exc
+                        open_time, timestamp_unit = self._normalize_timestamp(source_open_time)
+                        close_time, _ = self._normalize_timestamp(source_close_time)
+                        payload: dict[str, Any] = {
+                            "interval": interval,
+                            "open_time_ms": open_time,
+                            "source_open_time": source_open_time,
+                            "source_close_time": source_close_time,
+                            "source_timestamp_unit": timestamp_unit,
+                            "open": row[1],
+                            "high": row[2],
+                            "low": row[3],
+                            "close": row[4],
+                            "close_time_ms": close_time,
+                            "raw_columns": row,
+                            "source": "binance_official_bulk_archive",
+                            "archive_url": url,
+                            "price_type": price_type,
+                        }
+                        records.append(DataRecord(
+                            "binance", self.market_type,
+                            f"{type_names[price_type]}_klines_{interval}", symbol,
+                            open_time, str(open_time), payload,
+                        ))
+                    return records
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"Invalid ZIP archive: {url}") from exc
 
     def list_monthly_agg_trade_archives(
         self, symbol: str, start_month: str | None = None, end_month: str | None = None,
