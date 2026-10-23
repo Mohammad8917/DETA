@@ -158,7 +158,7 @@ class BinanceArchiveAdapter:
         parser = _Links()
         parser.feed(response.text)
         pattern = re.compile(
-            rf"^{re.escape(symbol)}-aggTrades-(\\d{{4}}-\\d{{2}})\\.zip$"
+            rf"^{re.escape(symbol)}-aggTrades-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
         for href in parser.hrefs:
@@ -230,7 +230,7 @@ class BinanceArchiveAdapter:
     @staticmethod
     def _agg_trade_archive_symbol(url: str) -> str:
         name = url.rstrip("/").rsplit("/", 1)[-1]
-        match = re.fullmatch(r"(.+)-aggTrades-\\d{4}-\\d{2}\\.zip", name)
+        match = re.fullmatch(r"(.+)-aggTrades-\d{4}-\d{2}\.zip", name)
         if not match:
             raise ValueError(f"Cannot infer symbol from aggregate-trade archive filename: {name}")
         return match.group(1)
