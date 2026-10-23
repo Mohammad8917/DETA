@@ -1,41 +1,53 @@
-# DETA — Exchange Data Archive
+# DETA — Public Exchange Data Archive
 
-DETA is a public-market-data collection system designed to discover and collect the broadest practical set of publicly accessible data from 10 cryptocurrency exchanges, with exchange-specific storage and resumable historical backfills.
+DETA is intended to discover and collect publicly available cryptocurrency market data, from the oldest history each source actually exposes through ongoing updates. It must never fabricate records or claim full coverage without evidence.
 
-## Project objective
+## Current implementation status
 
-- Discover all symbols and market types exposed by each configured exchange.
-- Collect the longest history actually available for each supported public data type; there is no fixed start-date cutoff.
-- Continue collecting new data after historical backfills, where the runtime environment is kept running.
-- Keep each exchange, market type, data type, and symbol logically separated in storage.
-- Track progress, failures, gaps, coverage, and source limitations explicitly.
-- Resume safely after interruption without silently treating missing data as complete.
+The first runnable slice supports **Binance Spot** public symbol discovery and historical native klines through Binance's public REST API, with local SQLite persistence and per-dataset checkpoints. The adapter also contains an aggregate-trades retrieval method, but it is not yet wired into the CLI or covered by live integration tests. Other exchanges and additional public data types are not implemented yet. This is **not** a complete ten-exchange collector.
 
-## Important limits
+## Requirements
 
-“Collect everything” means maximizing coverage of data that is publicly exposed and technically retrievable. It cannot guarantee recovery of information an exchange never published, has deleted, restricts, or does not provide through its public endpoints. Historical order-book snapshots and liquidation history, for example, may not be available for every exchange or symbol. Each dataset must report its actual coverage and limitations.
+- Python 3.13 or newer
+- Network access to public exchange APIs
+- Sufficient local disk space; exhaustive trade history can become very large
 
-Only public market-data interfaces are in scope. Private account access, API keys, wallets, order placement, and automated trading are out of scope.
+Install for development:
 
-## Design principles
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
 
-1. **Exchange isolation:** each exchange adapter has its own directory and tests.
-2. **Data-type isolation:** trades, candles, order books, funding, open interest, liquidations, metadata, and other supported datasets remain distinguishable.
-3. **No hidden truncation:** no hard-coded symbol allowlist or arbitrary historical start date.
-4. **Resumability:** checkpoints and manifests make progress durable and restartable.
-5. **Rate-limit respect:** use public documented endpoints, backoff, bounded concurrency, and exchange-specific limits.
-6. **Evidence-based status:** discovered, unsupported, unavailable, partial, complete, and failed are distinct states.
-7. **Data integrity:** preserve raw source records where possible; normalized data must retain provenance and timestamps.
-8. **Testability:** unit tests, adapter contract tests, and integration tests must verify behavior rather than merely import modules.
+Discover current Binance Spot symbols:
 
-## Planned exchange adapters
+```powershell
+python -m deta.cli discover
+```
 
-The first implementation milestone will verify public endpoints, historical archive availability, supported markets, rate limits, and licensing/terms before enabling each adapter. The ten exchanges are a configurable set; an adapter must not be marked supported until its behavior is implemented and tested.
+Backfill candles for every currently trading discovered Spot symbol at selected intervals:
 
-## Runtime
+```powershell
+python -m deta.cli backfill-klines --intervals 1m 5m 15m 1h 4h 1d
+```
 
-GitHub is used for source control, documentation, and automated tests. Large historical downloads and continuous collection should run on a machine or server with sufficient storage and stable connectivity; GitHub Actions is not intended to be the long-running data warehouse.
+Check saved coverage and per-dataset state:
 
-## Status
+```powershell
+python -m deta.cli status
+```
 
-Initial repository scope and engineering constraints are documented. Collection functionality is not claimed to exist until implemented and tested.
+Use `--db PATH` before the command to select another SQLite database. Use `--symbols BTCUSDT ETHUSDT` to test a small subset first.
+
+## Important limitations
+
+- Public endpoints expose different datasets and different history windows. DETA can only collect data that an exchange makes accessible; no software can recover data the source never published or no longer serves.
+- A successful process exit is not proof of historical completeness. Status remains partial/failed unless coverage is established; there is no false guarantee that all old data exists.
+- This first slice is **not yet a continuous live collector**, does not yet backfill all trade history, and does not yet support ten exchanges, derivatives, historical order books, funding/open-interest/liquidation archives, or delisted-symbol archives.
+- Historical ticker snapshots and historical order books generally cannot be reconstructed from current snapshots.
+- SQLite is an initial local store, not the final high-throughput format for a multi-terabyte archive.
+- No private account credentials, wallet access, or order-placement functionality is used.
+
+See `docs/ARCHITECTURE.md` for the contracts and implementation sequence.
