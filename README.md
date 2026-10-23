@@ -157,3 +157,7 @@ SQLite is the current initial store, not a proven high-throughput format for a m
 ## Architectural reference
 
 See `docs/ARCHITECTURE.md` for the historical collection contracts, source-adapter expectations, data inventory, completeness semantics, and implementation sequence.
+
+## Search keywords
+
+Historical cryptocurrency market data, Binance historical data, crypto OHLCV, exchange trade history, Spot and Futures datasets, public market-data API, historical candle downloader, aggregate trades, funding-rate history, Python data collection, backtesting data, official exchange archives.
