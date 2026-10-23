@@ -77,13 +77,13 @@ class SQLiteStore:
     def save_batch(self, records: list[DataRecord], *, cursor: str | None,
                    status: str = "partial", detail: str = "") -> int:
         if not records:
-            return 0
+            raise ValueError("Empty batches cannot advance a checkpoint")
         first = records[0]
         identity = (first.exchange_id, first.market_type, first.data_type, first.symbol)
         if any((r.exchange_id, r.market_type, r.data_type, r.symbol) != identity for r in records):
             raise ValueError("A storage batch must contain exactly one dataset identity")
         with self._connection:
-            before = self._connection.total_changes
+            before_records = self._connection.total_changes
             self._connection.executemany(
                 """INSERT INTO records(exchange_id, market_type, data_type, symbol,
                    timestamp_ms, record_key, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -92,6 +92,7 @@ class SQLiteStore:
                   r.record_key, json.dumps(r.payload, ensure_ascii=False, sort_keys=True))
                  for r in records],
             )
+            inserted_rows = self._connection.total_changes - before_records
             self._connection.execute(
                 """INSERT INTO checkpoints(exchange_id, market_type, data_type, symbol,
                    cursor, status, detail, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -100,7 +101,7 @@ class SQLiteStore:
                    updated_at=CURRENT_TIMESTAMP""",
                 (*identity, cursor, status, detail),
             )
-            return self._connection.total_changes - before
+            return inserted_rows
 
     def update_checkpoint(self, exchange_id: str, market_type: str, data_type: str,
                           symbol: str, cursor: str | None, status: str, detail: str = "") -> None:
