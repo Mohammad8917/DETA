@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Literal, Sequence
 
@@ -91,6 +92,14 @@ def _select_symbols(
     return symbols
 
 
+def _archive_month(url: str) -> str:
+    name = url.rstrip("/").rsplit("/", 1)[-1]
+    match = re.search(r"-(\\d{4}-\\d{2})(?:-\\d{2})?\\.zip$", name)
+    if match is None:
+        raise ValueError(f"Cannot determine archive month from filename: {name}")
+    return match.group(1)
+
+
 def _backfill_archive_klines(
     store: SQLiteStore,
     market: str,
@@ -123,9 +132,10 @@ def _backfill_archive_klines(
             # The official archive index, not current exchange metadata, is the primary source
             # for historical/delisted symbols. Keep locally known symbols as a fallback union.
             known = {str(item["symbol"]): item for item in stored_symbols}
-            archived = archive.list_archive_symbols("klines")
+            archived = set(archive.list_archive_symbols("klines", "monthly"))
+            archived.update(archive.list_archive_symbols("klines", "daily"))
             selected = [known.get(symbol, {"symbol": symbol})
-                        for symbol in sorted(set(known) | set(archived))]
+                        for symbol in sorted(set(known) | archived)]
 
         failed = archives_seen = pages_saved = rows_saved = 0
         for item in selected:
@@ -133,9 +143,16 @@ def _backfill_archive_klines(
             for interval in intervals:
                 data_type = f"klines_{interval}"
                 try:
-                    urls = archive.list_monthly_archives(
+                    monthly_urls = archive.list_monthly_archives(
                         symbol, interval, start_month=start_month, end_month=end_month
                     )
+                    daily_urls = archive.list_daily_archives(
+                        "klines", symbol, interval, start_month, end_month
+                    )
+                    monthly_months = {_archive_month(url) for url in monthly_urls}
+                    urls = sorted(monthly_urls + [
+                        url for url in daily_urls if _archive_month(url) not in monthly_months
+                    ])
                     if not urls:
                         existing_cursor = store.get_checkpoint(exchange_id, market_type, data_type, symbol)
                         store.update_checkpoint(
@@ -211,26 +228,35 @@ def _backfill_archive_trade_dataset(
         else:
             archive_dataset = "aggTrades" if dataset == "agg_trades" else "trades"
             known = {str(item["symbol"]): item for item in stored_symbols}
-            archived = archive.list_archive_symbols(archive_dataset)
+            archived = set(archive.list_archive_symbols(archive_dataset, "monthly"))
+            archived.update(archive.list_archive_symbols(archive_dataset, "daily"))
             selected = [known.get(symbol, {"symbol": symbol})
-                        for symbol in sorted(set(known) | set(archived))]
+                        for symbol in sorted(set(known) | archived)]
 
         failed = archives_seen = batches_saved = rows_saved = 0
         for item in selected:
             symbol = str(item["symbol"])
             try:
+                archive_dataset = "aggTrades" if dataset == "agg_trades" else "trades"
                 if dataset == "agg_trades":
-                    urls = archive.list_monthly_agg_trade_archives(
+                    monthly_urls = archive.list_monthly_agg_trade_archives(
                         symbol, start_month=start_month, end_month=end_month
                     )
                     fetch_archive = archive.fetch_agg_trade_archive
                     description = "aggregate-trade"
                 else:
-                    urls = archive.list_monthly_trade_archives(
+                    monthly_urls = archive.list_monthly_trade_archives(
                         symbol, start_month=start_month, end_month=end_month
                     )
                     fetch_archive = archive.fetch_trade_archive
                     description = "individual-trade"
+                daily_urls = archive.list_daily_archives(
+                    archive_dataset, symbol, start_month=start_month, end_month=end_month
+                )
+                monthly_months = {_archive_month(url) for url in monthly_urls}
+                urls = sorted(monthly_urls + [
+                    url for url in daily_urls if _archive_month(url) not in monthly_months
+                ])
                 if not urls:
                     cursor = store.get_checkpoint("binance", market_type, dataset, symbol)
                     store.update_checkpoint(
