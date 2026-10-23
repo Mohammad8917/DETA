@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.secret
+secrets/
+
+# Collected market data (keep local; do not commit large datasets)
+data/
+datasets/
+*.parquet
+*.arrow
+*.feather
+*.sqlite
+*.sqlite3
+*.db
+
+# Runtime state and logs
+logs/
+*.log
+state/
+checkpoints/
