@@ -47,6 +47,7 @@ These contracts may be changed only with an explicit, reviewed change and update
 ## Newly verified at unit-test level
 
 - **S3 archive-listing fallback:** the regression test for falling back from an HTML directory page with no usable archive links to an S3 `ListObjectsV2` response passed in CI at `439dfdf`. This verifies the mocked fallback path and symbol-prefix parsing only; it does not prove live endpoint availability, full pagination behaviour against Binance, or exhaustive historical symbol discovery.
+- **Manifest lifecycle — unit-test level:** deterministic success-path tests cover native klines, funding-rate archives, individual trades, and Futures price-klines; the trade and price-kline test runs passed. These tests prove mocked lifecycle behaviour only, not live Binance coverage. Current code is connected; independent full coverage remains unproven.
 
 ## Implemented but NOT yet locked as proven
 
@@ -62,7 +63,7 @@ These implementations are not yet proven end-to-end against the live source acro
 ## Explicit blockers before Binance can be fully locked
 
 1. **Live archive-index verification:** run the current index-discovery and archive-listing code against the real official source. Unit fixtures currently model HTML anchor listings; this must not be mistaken for proof that the live listing endpoint exposes the same anchors. If the source listing format differs, correct discovery before relying on it.
-2. **Persistent archive manifest:** record each expected archive URL, checksum, verification/import status, row count, timestamps, and errors so interrupted jobs can be audited and resumed without guessing.
+2. **Persistent archive manifest — implementation underway:** SQLite manifest storage exists, and unit-tested lifecycle integration now covers native klines, funding-rate archives, individual trades, and Futures mark/index/premium-price klines. Each path records discovered/verified/imported/failed state with checksum, size, row count, import timestamp, and errors. This is not yet proof that every edge case or source family is covered; empty verified archives currently remain verified rather than imported, and restart/resume behaviour still needs dedicated tests.
 3. **Source inventory and coverage report:** enumerate the source-supported datasets for Spot, USDⓈ-M, and COIN-M separately, and report unsupported/unavailable categories rather than assuming support.
 4. **Gap reconciliation:** compare archive inventory and imported records, detect missing/failed archive files and suspicious timestamp/identifier gaps, and distinguish true missing data from legitimate periods without trades.
 5. **Real integration tests:** verify at least representative historical and recent files for each supported archive family, including checksum verification, CSV schema, timestamp units, and persistence.
