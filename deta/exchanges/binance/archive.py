@@ -110,7 +110,10 @@ class BinanceArchiveAdapter:
         for href in parser.hrefs:
             if not href.endswith("/"):
                 continue
-            name = href.rstrip("/").rsplit("/", 1)[-1]
+            name = href.rstrip("/")
+            # Only accept immediate child directories; do not mistake nested paths for symbols.
+            if "/" in name:
+                continue
             if name and re.fullmatch(r"[A-Za-z0-9_]+", name):
                 symbols.add(name)
         return sorted(symbols)
