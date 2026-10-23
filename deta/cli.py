@@ -535,6 +535,7 @@ def _backfill_archive_trade_dataset(
         failed = archives_seen = batches_saved = rows_saved = 0
         for item in selected:
             symbol = str(item["symbol"])
+            current_archive_url = None
             try:
                 archive_dataset = "aggTrades" if dataset == "agg_trades" else "trades"
                 if dataset == "agg_trades":
@@ -564,7 +565,21 @@ def _backfill_archive_trade_dataset(
                     )
                     continue
                 for url in urls:
+                    current_archive_url = url
+                    store.upsert_archive_manifest(
+                        archive_url=url, exchange_id="binance", market_type=market_type,
+                        data_type=dataset, symbol=symbol, archive_period=_archive_month(url),
+                        status="discovered",
+                    )
                     records = fetch_archive(url)
+                    checksum = archive.last_verified_checksum_sha256
+                    size_bytes = archive.last_verified_size_bytes
+                    if checksum is None or size_bytes is None:
+                        raise RuntimeError("Archive adapter did not expose verified checksum metadata")
+                    store.update_archive_manifest(
+                        url, status="verified", checksum_sha256=checksum,
+                        size_bytes=size_bytes, row_count=len(records), error="",
+                    )
                     archives_seen += 1
                     if not records:
                         continue
@@ -576,11 +591,23 @@ def _backfill_archive_trade_dataset(
                         records, cursor=cursor, status="partial",
                         detail=f"Official {description} archives imported; source coverage and gaps are not yet independently verified",
                     )
+                    store.update_archive_manifest(
+                        url, status="imported", row_count=len(records),
+                        imported_at=datetime.now(timezone.utc).isoformat(), error="",
+                    )
                     batches_saved += 1
                     rows_saved += inserted
                 log.info("%s %s: imported %s official archives", symbol, description, len(urls))
             except Exception as exc:
                 failed += 1
+                if current_archive_url is not None:
+                    try:
+                        store.update_archive_manifest(
+                            current_archive_url, status="failed",
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                    except KeyError:
+                        pass
                 cursor = store.get_checkpoint("binance", market_type, dataset, symbol)
                 store.update_checkpoint(
                     "binance", market_type, dataset, symbol, cursor, "failed",
