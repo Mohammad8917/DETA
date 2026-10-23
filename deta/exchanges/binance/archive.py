@@ -107,9 +107,10 @@ class BinanceArchiveAdapter:
         if start and end and start > end:
             raise ValueError("start_month must not be later than end_month")
 
+        archive_interval = "1mo" if interval == "1M" else interval
         directory = (
             f"{self.base_url}/data/{self.archive_market_path}/monthly/klines/"
-            f"{symbol}/{interval}/"
+            f"{symbol}/{archive_interval}/"
         )
         response = self._get(directory, allow_not_found=True)
         if response.status_code == 404:
@@ -426,4 +427,5 @@ class BinanceArchiveAdapter:
         match = re.fullmatch(r"(.+)-([^-]+)-(\d{4}-\d{2})\.zip", name)
         if not match:
             raise ValueError(f"Cannot infer symbol and interval from archive filename: {name}")
-        return match.group(1), match.group(2)
+        interval = "1M" if match.group(2) == "1mo" else match.group(2)
+        return match.group(1), interval
