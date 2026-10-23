@@ -102,7 +102,7 @@ python -m deta.cli backfill-archive-klines --market usd-m --intervals 1m 5m 15m 
 python -m deta.cli backfill-archive-klines --market coin-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSD_PERP
 ```
 
-Use `--start-month YYYY-MM --end-month YYYY-MM` to limit archive months. If month bounds are omitted, the command imports all monthly archives listed by the source for the selected symbol/interval. Without `--symbols`, it uses all locally known symbols/contracts, including retained inactive entries; current discovery does not automatically reveal every delisted historical symbol. Archive imports are idempotent at the record key, but comprehensive coverage verification and gap repair are still pending.
+Use `--start-month YYYY-MM --end-month YYYY-MM` to limit archive months. If month bounds are omitted, the command imports all monthly archives listed by the source for the selected symbol/interval. For historical aggregate trades, use `backfill-archive-agg-trades` with the same `--market`, `--symbols`, and month-bound options. Without `--symbols`, these commands use all locally known symbols/contracts, including retained inactive entries; current discovery does not automatically reveal every delisted historical symbol. Archive imports are idempotent at the record key, but checksum verification, comprehensive coverage verification, and gap repair are still pending.
 
 Check stored dataset state:
 
