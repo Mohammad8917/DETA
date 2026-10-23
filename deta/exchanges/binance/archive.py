@@ -136,14 +136,14 @@ class BinanceArchiveAdapter:
                 f"{symbol}/{archive_interval}/"
             )
             pattern = re.compile(
-                rf"^{re.escape(symbol)}-{re.escape(archive_interval)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
+                rf"^{re.escape(symbol)}-{re.escape(archive_interval)}-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$"
             )
         else:
             directory = (
                 f"{self.base_url}/data/{self.archive_market_path}/daily/{dataset}/{symbol}/"
             )
             pattern = re.compile(
-                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\\d{{4}}-\\d{{2}}-\\d{{2}})\\.zip$"
+                rf"^{re.escape(symbol)}-{re.escape(dataset)}-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$"
             )
         start = self._parse_month(start_month) if start_month else None
         end = self._parse_month(end_month) if end_month else None
@@ -348,7 +348,7 @@ class BinanceArchiveAdapter:
     @staticmethod
     def _trade_archive_symbol(url: str) -> str:
         name = url.rstrip("/").rsplit("/", 1)[-1]
-        match = re.fullmatch(r"(.+)-trades-\d{4}-\d{2}\.zip", name)
+        match = re.fullmatch(r"(.+)-trades-\d{4}-\d{2}(?:-\d{2})?\.zip", name)
         if not match:
             raise ValueError(f"Cannot infer symbol from trade archive filename: {name}")
         return match.group(1)
@@ -412,7 +412,7 @@ class BinanceArchiveAdapter:
     @staticmethod
     def _agg_trade_archive_symbol(url: str) -> str:
         name = url.rstrip("/").rsplit("/", 1)[-1]
-        match = re.fullmatch(r"(.+)-aggTrades-\d{4}-\d{2}\.zip", name)
+        match = re.fullmatch(r"(.+)-aggTrades-\d{4}-\d{2}(?:-\d{2})?\.zip", name)
         if not match:
             raise ValueError(f"Cannot infer symbol from aggregate-trade archive filename: {name}")
         return match.group(1)
@@ -503,7 +503,7 @@ class BinanceArchiveAdapter:
     @staticmethod
     def _archive_identity(url: str) -> tuple[str, str]:
         name = url.rstrip("/").rsplit("/", 1)[-1]
-        match = re.fullmatch(r"(.+)-([^-]+)-(\d{4}-\d{2})\.zip", name)
+        match = re.fullmatch(r"(.+)-([^-]+)-(\d{4}-\d{2}(?:-\d{2})?)\.zip", name)
         if not match:
             raise ValueError(f"Cannot infer symbol and interval from archive filename: {name}")
         interval = "1M" if match.group(2) == "1mo" else match.group(2)
