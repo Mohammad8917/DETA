@@ -331,3 +331,24 @@ def test_futures_funding_rate_archive_discovery_and_parsing() -> None:
     assert record.payload["last_funding_rate"] == "0.0001"
     assert record.payload["funding_rate"] == "0.0001"
     adapter.close()
+
+
+
+def test_archive_symbol_discovery_falls_back_to_s3_list_objects_v2() -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/klines/"
+    s3_listing = (
+        "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        "?list-type=2&prefix=data%2Fspot%2Fmonthly%2Fklines%2F&delimiter=%2F"
+    )
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+      <IsTruncated>false</IsTruncated>
+      <CommonPrefixes><Prefix>data/spot/monthly/klines/BTCUSDT/</Prefix></CommonPrefixes>
+      <CommonPrefixes><Prefix>data/spot/monthly/klines/OLDUSDT/</Prefix></CommonPrefixes>
+      <Contents><Key>data/spot/monthly/klines/readme.txt</Key></Contents>
+    </ListBucketResult>"""
+    client = MockClient({directory: "<html><body>JavaScript loads entries</body></html>", s3_listing: xml})
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
+    assert client.calls == [directory, s3_listing]
+    adapter.close()
