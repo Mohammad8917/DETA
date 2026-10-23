@@ -135,3 +135,51 @@ class BinanceDerivativesAdapter:
             if end_ms is not None and next_cursor > end_ms:
                 return
             cursor = next_cursor
+
+    def iter_funding_rates(
+        self, symbol: str, start_ms: int = 0, end_ms: int | None = None
+    ) -> Iterator[list[DataRecord]]:
+        """Stream public historical funding-rate records in funding-time order."""
+        if not symbol:
+            raise ValueError("symbol must not be empty")
+        if start_ms < 0 or (end_ms is not None and end_ms < start_ms):
+            raise ValueError("Invalid funding-rate time range")
+        cursor = start_ms
+        while True:
+            params: dict[str, Any] = {
+                "symbol": symbol, "startTime": cursor, "limit": 1000
+            }
+            if end_ms is not None:
+                params["endTime"] = end_ms
+            rows = self._get("/fundingRate", params)
+            if not rows:
+                return
+            records: list[DataRecord] = []
+            timestamps: list[int] = []
+            for row in rows:
+                funding_time = int(row["fundingTime"])
+                if end_ms is not None and funding_time > end_ms:
+                    continue
+                if funding_time < cursor:
+                    continue
+                payload = {
+                    "funding_time_ms": funding_time,
+                    "funding_rate": row["fundingRate"],
+                    "mark_price": row.get("markPrice"),
+                    "source": "binance_futures_rest_native",
+                    "market": self.market,
+                }
+                records.append(DataRecord(
+                    "binance", self.market_type, "funding_rate", symbol,
+                    funding_time, str(funding_time), payload,
+                ))
+                timestamps.append(funding_time)
+            if records:
+                records.sort(key=lambda record: record.timestamp_ms)
+                yield records
+            next_cursor = max(timestamps, default=cursor - 1) + 1
+            if next_cursor <= cursor or len(rows) < 1000:
+                return
+            if end_ms is not None and next_cursor > end_ms:
+                return
+            cursor = next_cursor
