@@ -12,7 +12,7 @@ Implemented initial slices:
 - Binance COIN-M Futures: public contract discovery and native historical klines, including perpetual and delivery contract metadata.
 - SQLite persistence with per-dataset checkpoints.
 
-The current implementation is an initial subset, not a complete historical archive. Official monthly and daily kline, aggregate-trade, and individual-trade ZIP archive discovery/import are implemented for Binance Spot, USDⓈ-M, and COIN-M. Daily archives are used for months where no monthly archive is listed, helping cover recent data before monthly publication. Archive SHA-256 sidecars are required and verified before parsing, and Spot archive timestamps expressed in microseconds are normalized to the storage millisecond unit while preserving the original source timestamp. Individual-trade archive ingestion is implemented. Funding-rate history is available through the Futures public REST adapter. Historical Futures mark-price, index-price, and premium-index candle archive import is implemented. Funding-rate archive ingestion, comprehensive gap reconciliation, and additional exchanges remain pending. Passing unit tests does not prove complete real-world historical coverage.
+The current implementation is an initial subset, not a complete historical archive. Official monthly and daily kline, aggregate-trade, and individual-trade ZIP archive discovery/import are implemented for Binance Spot, USDⓈ-M, and COIN-M. Daily archives are used for months where no monthly archive is listed, helping cover recent data before monthly publication. Archive SHA-256 sidecars are required and verified before parsing, and Spot archive timestamps expressed in microseconds are normalized to the storage millisecond unit while preserving the original source timestamp. Individual-trade archive ingestion is implemented. Funding-rate history is available through the Futures public REST adapter and official monthly funding-rate archives. Historical Futures mark-price, index-price, and premium-index candle archive import is also implemented. Comprehensive gap reconciliation and additional exchanges remain pending. Passing unit tests does not prove complete real-world historical coverage.
 
 ## Scope
 
@@ -99,6 +99,8 @@ Backfill historical Futures funding rates:
 ```powershell
 python -m deta.cli backfill-funding-rates --market usd-m --symbols BTCUSDT ETHUSDT
 python -m deta.cli backfill-funding-rates --market coin-m --symbols BTCUSD_PERP
+python -m deta.cli backfill-archive-funding-rates --market usd-m --symbols BTCUSDT
+python -m deta.cli backfill-archive-funding-rates --market coin-m --symbols BTCUSD_PERP
 ```
 
 Import Futures mark/index/premium-price candle archives:
