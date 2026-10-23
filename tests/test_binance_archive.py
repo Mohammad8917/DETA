@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import zipfile
 
@@ -33,6 +34,10 @@ def make_zip(csv_text: str) -> bytes:
     return buffer.getvalue()
 
 
+def checksum_text(payload: bytes, filename: str) -> str:
+    return f"{hashlib.sha256(payload).hexdigest()}  {filename}\\n"
+
+
 def test_archive_discovery_filters_exact_months_and_ignores_checksums() -> None:
     directory = (
         "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/"
@@ -63,9 +68,12 @@ def test_archive_csv_is_normalized_with_source_identity_preserved() -> None:
         "count,taker_buy_volume,taker_buy_quote_volume,ignore\n"
         "1704067200000,1,3,0.5,2,10,1704067259999,20,4,6,12,0\n"
     )
-    adapter = BinanceArchiveAdapter(
-        "usd-m", client=MockClient({url: make_zip(csv_text)}), request_pause=0
-    )
+    archive_bytes = make_zip(csv_text)
+    client = MockClient({
+        url: archive_bytes,
+        url + ".CHECKSUM": checksum_text(archive_bytes, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("usd-m", client=client, request_pause=0)
     records = adapter.fetch_kline_archive(url)
     assert len(records) == 1
     record = records[0]
@@ -104,7 +112,12 @@ def test_aggregate_trade_archive_discovery_and_parsing() -> None:
         "is_buyer_maker,is_best_match\n"
         "123,65000.1,0.002,120,125,1704067200000,true,true\n"
     )
-    client = MockClient({directory: listing, archive_url: make_zip(csv_text)})
+    archive_bytes = make_zip(csv_text)
+    client = MockClient({
+        directory: listing,
+        archive_url: archive_bytes,
+        archive_url + ".CHECKSUM": checksum_text(archive_bytes, archive_url.rsplit("/", 1)[-1]),
+    })
     adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
     assert adapter.list_monthly_agg_trade_archives(
         "BTCUSDT", start_month="2024-01", end_month="2024-01"
@@ -115,4 +128,63 @@ def test_aggregate_trade_archive_discovery_and_parsing() -> None:
     assert records[0].record_key == "123"
     assert records[0].payload["is_buyer_maker"] is True
     assert records[0].payload["is_best_match"] is True
+    adapter.close()
+
+
+def test_archive_checksum_mismatch_is_rejected() -> None:
+    url = (
+        "https://data.binance.vision/data/spot/monthly/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    )
+    archive_bytes = make_zip(
+        "1704067200000,1,3,0.5,2,10,1704067259999,20,4,6,12,0\\n"
+    )
+    client = MockClient({
+        url: archive_bytes,
+        url + ".CHECKSUM": "0" * 64 + "  BTCUSDT-1m-2024-01.zip\\n",
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        adapter.fetch_kline_archive(url)
+    adapter.close()
+
+
+def test_spot_microsecond_archive_timestamps_are_normalized_to_milliseconds() -> None:
+    url = (
+        "https://data.binance.vision/data/spot/monthly/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2025-01.zip"
+    )
+    archive_bytes = make_zip(
+        "1735689600000000,1,3,0.5,2,10,1735689659999999,20,4,6,12,0\\n"
+    )
+    client = MockClient({
+        url: archive_bytes,
+        url + ".CHECKSUM": checksum_text(archive_bytes, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    record = adapter.fetch_kline_archive(url)[0]
+    assert record.timestamp_ms == 1735689600000
+    assert record.payload["source_open_time"] == 1735689600000000
+    assert record.payload["source_timestamp_unit"] == "microseconds"
+    assert record.payload["close_time_ms"] == 1735689659999
+    adapter.close()
+
+
+def test_spot_aggregate_trade_microsecond_timestamp_is_normalized() -> None:
+    url = (
+        "https://data.binance.vision/data/spot/monthly/aggTrades/BTCUSDT/"
+        "BTCUSDT-aggTrades-2025-01.zip"
+    )
+    archive_bytes = make_zip(
+        "0,0.2,50,0,0,1735689600010866,False,True\\n"
+    )
+    client = MockClient({
+        url: archive_bytes,
+        url + ".CHECKSUM": checksum_text(archive_bytes, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    record = adapter.fetch_agg_trade_archive(url)[0]
+    assert record.timestamp_ms == 1735689600010
+    assert record.payload["source_timestamp"] == 1735689600010866
+    assert record.payload["source_timestamp_unit"] == "microseconds"
     adapter.close()
