@@ -12,7 +12,7 @@ Implemented initial slices:
 - Binance COIN-M Futures: public contract discovery and native historical klines, including perpetual and delivery contract metadata.
 - SQLite persistence with per-dataset checkpoints.
 
-The current implementation is an initial subset, not a complete historical archive. Futures trades, funding rates, mark/index-price history, historical bulk-archive ingestion, comprehensive gap reconciliation, and additional exchanges are not yet fully implemented. Passing unit tests does not prove complete real-world historical coverage.
+The current implementation is an initial subset, not a complete historical archive. Official monthly kline ZIP archive discovery and import are now implemented for Binance Spot, USDⓈ-M, and COIN-M; Futures trades, funding rates, mark/index-price history, comprehensive gap reconciliation, and additional exchanges are not yet fully implemented. Passing unit tests does not prove complete real-world historical coverage.
 
 ## Scope
 
@@ -93,6 +93,16 @@ Backfill Futures candles:
 python -m deta.cli backfill-derivative-klines --market usd-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSDT ETHUSDT
 python -m deta.cli backfill-derivative-klines --market coin-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSD_PERP
 ```
+
+Import all listed monthly kline archives for selected symbols/contracts (this can take substantial time and disk space):
+
+```powershell
+python -m deta.cli backfill-archive-klines --market spot --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSDT ETHUSDT
+python -m deta.cli backfill-archive-klines --market usd-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSDT ETHUSDT
+python -m deta.cli backfill-archive-klines --market coin-m --intervals 1m 5m 15m 1h 4h 1d --symbols BTCUSD_PERP
+```
+
+Use `--start-month YYYY-MM --end-month YYYY-MM` to limit archive months. If month bounds are omitted, the command imports all monthly archives listed by the source for the selected symbol/interval. Without `--symbols`, it uses all locally known symbols/contracts, including retained inactive entries; current discovery does not automatically reveal every delisted historical symbol. Archive imports are idempotent at the record key, but comprehensive coverage verification and gap repair are still pending.
 
 Check stored dataset state:
 
