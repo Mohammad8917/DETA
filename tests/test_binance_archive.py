@@ -329,4 +329,5 @@ def test_futures_funding_rate_archive_discovery_and_parsing() -> None:
     assert record.timestamp_ms == 1700000000000
     assert record.payload["funding_interval_hours"] == "8"
     assert record.payload["last_funding_rate"] == "0.0001"
+    assert record.payload["funding_rate"] == "0.0001"
     adapter.close()
