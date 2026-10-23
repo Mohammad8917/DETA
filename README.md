@@ -1,5 +1,10 @@
 # DETA — Historical Exchange Market Data Collection Platform
 
+<p align="center">
+  <img src="docs/images/deta-banner.svg" alt="DETA — historical exchange market data collection platform" width="100%">
+</p>
+
+
 DETA is a platform for collecting, storing, validating, and completing historical market data published by cryptocurrency exchanges through their public APIs, official archives, and other verifiable public sources.
 
 Its purpose is historical data coverage and integrity. DETA does not analyze markets, generate trading signals, predict prices, or execute trades.
