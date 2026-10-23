@@ -12,7 +12,8 @@ import zipfile
 from datetime import date
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin, urlsplit
+from xml.etree import ElementTree
 
 import httpx
 
@@ -99,6 +100,66 @@ class BinanceArchiveAdapter:
                 time.sleep(min(30.0, 2**attempt))
         raise RuntimeError(f"Binance archive request failed for {url}: {last_error}") from last_error
 
+    def _list_directory_hrefs(self, directory: str) -> list[str]:
+        """List entries from HTML when available, falling back to S3 ListObjectsV2.
+
+        The public file-browser can render entries through JavaScript and expose no
+        archive links to an HTML parser. The S3 listing API is the fallback source.
+        """
+        response = self._get(directory, allow_not_found=True)
+        if response.status_code != 404:
+            parser = _Links()
+            parser.feed(response.text)
+            useful = [
+                href for href in parser.hrefs
+                if href not in {"../", "./", "/"}
+                and (href.endswith("/") or ".zip" in href.lower())
+            ]
+            if useful:
+                return useful
+
+        prefix = urlsplit(directory).path.lstrip("/")
+        if not prefix.endswith("/"):
+            prefix += "/"
+        endpoint = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        entries: set[str] = set()
+        continuation: str | None = None
+        while True:
+            params = {"list-type": "2", "prefix": prefix, "delimiter": "/"}
+            if continuation:
+                params["continuation-token"] = continuation
+            listing_url = f"{endpoint}?{urlencode(params)}"
+            listing_response = self._get(listing_url, allow_not_found=True)
+            if listing_response.status_code == 404:
+                return []
+            try:
+                root = ElementTree.fromstring(listing_response.content)
+            except ElementTree.ParseError as exc:
+                raise RuntimeError(f"Invalid S3 archive listing XML for prefix {prefix}") from exc
+
+            def child_text(element: ElementTree.Element, wanted: str) -> str | None:
+                for child in element.iter():
+                    if child.tag.rsplit("}", 1)[-1] == wanted:
+                        return child.text
+                return None
+
+            for element in root.iter():
+                tag = element.tag.rsplit("}", 1)[-1]
+                if tag == "Contents":
+                    key = child_text(element, "Key")
+                    if key and key.startswith(prefix):
+                        entries.add(key[len(prefix):])
+                elif tag == "CommonPrefixes":
+                    child_prefix = child_text(element, "Prefix")
+                    if child_prefix and child_prefix.startswith(prefix):
+                        entries.add(child_prefix[len(prefix):])
+
+            truncated = child_text(root, "IsTruncated")
+            continuation = child_text(root, "NextContinuationToken")
+            if truncated != "true" or not continuation:
+                break
+        return sorted(entries)
+
     def list_archive_symbols(self, dataset: str, frequency: str = "monthly") -> list[str]:
         """Discover symbols from official monthly/daily archive indexes, including delisted markets."""
         folders = {
@@ -113,13 +174,9 @@ class BinanceArchiveAdapter:
         directory = (
             f"{self.base_url}/data/{self.archive_market_path}/{frequency}/{folders[dataset]}/"
         )
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         symbols: set[str] = set()
-        for href in parser.hrefs:
+        for href in hrefs:
             if not href.endswith("/"):
                 continue
             name = href.rstrip("/")
@@ -172,13 +229,9 @@ class BinanceArchiveAdapter:
         end = self._parse_month(end_month) if end_month else None
         if start and end and start > end:
             raise ValueError("start_month must not be later than end_month")
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         found: list[tuple[date, str]] = []
-        for href in parser.hrefs:
+        for href in hrefs:
             name = href.rstrip("/").rsplit("/", 1)[-1]
             match = pattern.fullmatch(name)
             if not match:
@@ -214,16 +267,12 @@ class BinanceArchiveAdapter:
             f"{self.base_url}/data/{self.archive_market_path}/monthly/klines/"
             f"{symbol}/{archive_interval}/"
         )
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         pattern = re.compile(
             rf"^{re.escape(symbol)}-{re.escape(archive_interval)}-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
-        for href in parser.hrefs:
+        for href in hrefs:
             name = href.rstrip("/").rsplit("/", 1)[-1]
             match = pattern.fullmatch(name)
             if not match:
@@ -261,16 +310,12 @@ class BinanceArchiveAdapter:
         directory = (
             f"{self.base_url}/data/{self.archive_market_path}/monthly/fundingRate/{symbol}/"
         )
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         pattern = re.compile(
             rf"^{re.escape(symbol)}-fundingRate-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
-        for href in parser.hrefs:
+        for href in hrefs:
             name = href.rstrip("/").rsplit("/", 1)[-1]
             match = pattern.fullmatch(name)
             if not match:
@@ -379,16 +424,12 @@ class BinanceArchiveAdapter:
         end = self._parse_month(end_month) if end_month else None
         if start and end and start > end:
             raise ValueError("start_month must not be later than end_month")
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         pattern = re.compile(
             rf"^{re.escape(symbol)}-{re.escape(price_type)}-{re.escape(archive_interval)}-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
-        for href in parser.hrefs:
+        for href in hrefs:
             name = href.rstrip("/").rsplit("/", 1)[-1]
             match = pattern.fullmatch(name)
             if not match:
@@ -482,16 +523,12 @@ class BinanceArchiveAdapter:
         directory = (
             f"{self.base_url}/data/{self.archive_market_path}/monthly/aggTrades/{symbol}/"
         )
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         pattern = re.compile(
             rf"^{re.escape(symbol)}-aggTrades-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
-        for href in parser.hrefs:
+        for href in hrefs:
             name = href.rstrip("/").rsplit("/", 1)[-1]
             match = pattern.fullmatch(name)
             if not match:
@@ -517,16 +554,12 @@ class BinanceArchiveAdapter:
         directory = (
             f"{self.base_url}/data/{self.archive_market_path}/monthly/trades/{symbol}/"
         )
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code == 404:
-            return []
-        parser = _Links()
-        parser.feed(response.text)
+        hrefs = self._list_directory_hrefs(directory)
         pattern = re.compile(
             rf"^{re.escape(symbol)}-trades-(\d{{4}}-\d{{2}})\.zip$"
         )
         found: list[tuple[date, str]] = []
-        for href in parser.hrefs:
+        for href in hrefs:
             name = href.rstrip("/").rsplit("/", 1)[-1]
             match = pattern.fullmatch(name)
             if not match:
