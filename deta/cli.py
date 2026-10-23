@@ -120,9 +120,12 @@ def _backfill_archive_klines(
                     selected = [entry for entry in selected if str(entry["symbol"]) != str(item["symbol"])]
                     selected.append(item)
         else:
-            # Include locally retained inactive/delisted symbols; current discovery alone cannot
-            # reveal every historical symbol ever listed by the exchange.
-            selected = stored_symbols
+            # The official archive index, not current exchange metadata, is the primary source
+            # for historical/delisted symbols. Keep locally known symbols as a fallback union.
+            known = {str(item["symbol"]): item for item in stored_symbols}
+            archived = archive.list_archive_symbols("klines")
+            selected = [known.get(symbol, {"symbol": symbol})
+                        for symbol in sorted(set(known) | set(archived))]
 
         failed = archives_seen = pages_saved = rows_saved = 0
         for item in selected:
@@ -206,7 +209,11 @@ def _backfill_archive_trade_dataset(
             by_symbol = {str(item["symbol"]): item for item in stored_symbols}
             selected = [by_symbol.get(symbol, {"symbol": symbol}) for symbol in requested_symbols]
         else:
-            selected = stored_symbols
+            archive_dataset = "aggTrades" if dataset == "agg_trades" else "trades"
+            known = {str(item["symbol"]): item for item in stored_symbols}
+            archived = archive.list_archive_symbols(archive_dataset)
+            selected = [known.get(symbol, {"symbol": symbol})
+                        for symbol in sorted(set(known) | set(archived))]
 
         failed = archives_seen = batches_saved = rows_saved = 0
         for item in selected:
