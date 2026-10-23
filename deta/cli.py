@@ -117,6 +117,21 @@ def _select_symbols(
     return symbols
 
 
+def _monotonic_cursor(
+    store: SQLiteStore,
+    exchange_id: str,
+    market_type: str,
+    data_type: str,
+    symbol: str,
+    candidate: int,
+) -> str:
+    """Prevent archive imports from moving a dataset checkpoint backward."""
+    existing = store.get_checkpoint(exchange_id, market_type, data_type, symbol)
+    if existing is not None and existing.isdigit():
+        candidate = max(candidate, int(existing))
+    return str(candidate)
+
+
 def _archive_month(url: str) -> str:
     name = url.rstrip("/").rsplit("/", 1)[-1]
     match = re.search(r"-(\d{4}-\d{2})(?:-\d{2})?\.zip$", name)
@@ -202,9 +217,12 @@ def _backfill_archive_klines(
                             )
                             continue
                         last = max(record.timestamp_ms for record in records)
+                        cursor = _monotonic_cursor(
+                            store, exchange_id, market_type, data_type, symbol, last + 1
+                        )
                         inserted = store.save_batch(
-                            records, cursor=str(last + 1), status="partial",
-                            detail="Official monthly archives imported; full source coverage and gaps are not yet independently verified",
+                            records, cursor=cursor, status="partial",
+                            detail="Official monthly/daily archives imported; full source coverage and gaps are not yet independently verified",
                         )
                         pages_saved += 1
                         rows_saved += inserted
@@ -284,10 +302,9 @@ def _backfill_archive_funding_rates(
                     if not records:
                         continue
                     candidate_cursor = max(record.timestamp_ms for record in records) + 1
-                    previous = store.get_checkpoint(
-                        "binance", source.market_type, data_type, symbol
+                    cursor = _monotonic_cursor(
+                        store, "binance", source.market_type, data_type, symbol, candidate_cursor
                     )
-                    cursor = max(candidate_cursor, int(previous)) if previous and previous.isdigit() else candidate_cursor
                     inserted = store.save_batch(
                         records, cursor=str(cursor), status="partial",
                         detail="Official funding-rate archives imported; source coverage and gaps are not independently verified",
@@ -386,8 +403,11 @@ def _backfill_archive_price_klines(
                         if not records:
                             continue
                         last = max(record.timestamp_ms for record in records)
+                        cursor = _monotonic_cursor(
+                            store, "binance", source.market_type, data_type, symbol, last + 1
+                        )
                         inserted = store.save_batch(
-                            records, cursor=str(last + 1), status="partial",
+                            records, cursor=cursor, status="partial",
                             detail=f"Official {price_type} archives imported; full coverage and gaps are not independently verified",
                         )
                         batches_saved += 1
@@ -492,10 +512,10 @@ def _backfill_archive_trade_dataset(
                     archives_seen += 1
                     if not records:
                         continue
-                    if dataset == "agg_trades":
-                        cursor = str(max(int(record.record_key) for record in records) + 1)
-                    else:
-                        cursor = str(max(int(record.record_key) for record in records) + 1)
+                    candidate_cursor = max(int(record.record_key) for record in records) + 1
+                    cursor = _monotonic_cursor(
+                        store, "binance", market_type, dataset, symbol, candidate_cursor
+                    )
                     inserted = store.save_batch(
                         records, cursor=cursor, status="partial",
                         detail=f"Official {description} archives imported; source coverage and gaps are not yet independently verified",
