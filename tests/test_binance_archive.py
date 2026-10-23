@@ -352,3 +352,47 @@ def test_archive_symbol_discovery_falls_back_to_s3_list_objects_v2() -> None:
     assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
     assert client.calls == [directory, s3_listing]
     adapter.close()
+
+
+
+def test_archive_symbol_discovery_follows_s3_continuation_tokens() -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/klines/"
+    base = (
+        "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        "?list-type=2&prefix=data%2Fspot%2Fmonthly%2Fklines%2F&delimiter=%2F"
+    )
+    second = base + "&continuation-token=page-token-2"
+    first_xml = """<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+      <IsTruncated>true</IsTruncated>
+      <NextContinuationToken>page-token-2</NextContinuationToken>
+      <CommonPrefixes><Prefix>data/spot/monthly/klines/BTCUSDT/</Prefix></CommonPrefixes>
+    </ListBucketResult>"""
+    second_xml = """<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+      <IsTruncated>false</IsTruncated>
+      <CommonPrefixes><Prefix>data/spot/monthly/klines/OLDUSDT/</Prefix></CommonPrefixes>
+    </ListBucketResult>"""
+    client = MockClient({
+        directory: "<html>JavaScript loads entries</html>",
+        base: first_xml,
+        second: second_xml,
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
+    assert client.calls == [directory, base, second]
+    adapter.close()
+
+
+def test_verified_archive_exposes_exact_checksum_and_byte_size() -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    payload = make_zip(
+        "1704067200000,1,3,0.5,2,10,1704067259999,20,4,6,12,0\\n"
+    )
+    client = MockClient({
+        url: payload,
+        url + ".CHECKSUM": checksum_text(payload, url.rsplit("/", 1)[-1]),
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert len(adapter.fetch_kline_archive(url)) == 1
+    assert adapter.last_verified_checksum_sha256 == hashlib.sha256(payload).hexdigest()
+    assert adapter.last_verified_size_bytes == len(payload)
+    adapter.close()
