@@ -386,7 +386,7 @@ def test_archive_symbol_discovery_falls_back_to_s3_list_objects_v2() -> None:
     client = MockClient({directory: "<html><body>JavaScript loads entries</body></html>", s3_listing: xml})
     adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
     assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
-    assert client.calls == [directory, s3_listing]
+    assert client.calls == [s3_listing]
     adapter.close()
 
 
@@ -414,7 +414,7 @@ def test_archive_symbol_discovery_follows_s3_continuation_tokens() -> None:
     })
     adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
     assert adapter.list_archive_symbols("klines") == ["BTCUSDT", "OLDUSDT"]
-    assert client.calls == [directory, base, second]
+    assert client.calls == [base, second]
     adapter.close()
 
 
