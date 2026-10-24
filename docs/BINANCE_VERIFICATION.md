@@ -12,11 +12,15 @@ This file is the source of truth for which Binance DETA behaviours are frozen an
 
 ## Current evidence snapshot
 
-Repository revision assessed for the current unit-test snapshot: `06b6037eb013bb6ab6e7ab260bf9837dd4c8a3ba` (2026-10-24).
+Repository revision assessed for this evidence snapshot: `b074f4ee0aa159747e35484d8a220354bea07d87` (2026-10-24).
 
-The GitHub Actions run for the current revision completed successfully: https://github.com/Mohammad8917/DETA/actions/runs/40052210858 (unit tests; Python 3.13.16; 39 tests passed in the associated preceding test run after correcting the funding-rate fake adapter constructor). Recent manifest-audit and live-smoke-workflow-definition changes also passed CI: https://github.com/Mohammad8917/DETA/actions/runs/40050300917 and https://github.com/Mohammad8917/DETA/actions/runs/40050290015.
+The following recent GitHub Actions runs completed successfully:
+- `40053280269` — verifies that archive counters distinguish checksum-verified archives from archives actually imported.
+- `40053269891` — separates verified and imported archive counters in the importer.
+- `40052871433` — verifies that an empty but checksum-verified archive remains `verified`, with zero rows and no import timestamp.
+- `40052419835` — verification-ledger update and manifest audit changes.
 
-This is unit-test/CI evidence only. The manual live workflow has not yet been executed, so these runs are not live Binance end-to-end evidence and do not prove additional source coverage.
+These are unit-test/CI evidence only. The manual live workflow has not been executed; these runs are not live Binance end-to-end evidence and do not prove additional source coverage.
 
 ## Locked contracts — current scope only
 
@@ -48,6 +52,7 @@ These contracts may be changed only with an explicit, reviewed change and update
 - **S3 archive-listing fallback:** the regression test for falling back from an HTML directory page with no usable archive links to an S3 `ListObjectsV2` response passed in CI at `439dfdf`. This verifies the mocked fallback path and symbol-prefix parsing only; it does not prove live endpoint availability, full pagination behaviour against Binance, or exhaustive historical symbol discovery.
 - **Manifest lifecycle — unit-test level:** deterministic success-path tests cover native klines, funding-rate archives, individual trades, and Futures price-klines. The funding-rate lifecycle test initially failed because its fake adapter did not accept the market argument; the test fixture was corrected in commit `06b6037`, and the current CI run passed. These tests prove mocked lifecycle behaviour only, not live Binance coverage. Current code is connected; independent full coverage remains unproven.
 - **Manifest audit CLI — unit-test level:** `archive-manifest` reports persisted manifest rows/status counts with optional market/data-type/symbol filters and explicitly warns that manifest state is not proof of exhaustive source coverage. Tests and the workflow artifact update passed CI. The manual live workflow definition has been checked against the CLI parser, but it has not been dispatched in this evidence snapshot.
+- **Verified-vs-imported accounting — unit-test level:** `archives_verified` increments after checksum-verified archive parsing; `archives_imported` increments only after non-empty records are persisted and the manifest is marked imported. An empty archive remains `verified` and does not inflate the imported counter. Commits `d1eb7994` and `b074f4ee`; CI runs `40053269891` and `40053280269` passed.
 
 ## Implemented but NOT yet locked as proven
 
