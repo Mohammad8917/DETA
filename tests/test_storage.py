@@ -186,7 +186,7 @@ def test_checkpoint_resume_after_interruption_uses_last_committed_batch(tmp_path
     """A restart resumes after the last batch committed with its checkpoint."""
     path = tmp_path / "resume.sqlite3"
     first_page = [
-        DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"}),
+        DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 1_704_067_200_000, "1704067200000", {"close": "1"}),
         DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 120_000, "120000", {"close": "2"}),
     ]
     with SQLiteStore(path) as store:
@@ -212,7 +212,7 @@ def test_checkpoint_resume_after_interruption_uses_last_committed_batch(tmp_path
 def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_path: Path) -> None:
     path = tmp_path / "provenance.sqlite3"
     url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
-    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
+    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 1_704_067_200_000, "1704067200000", {"close": "1"})
     with SQLiteStore(path) as store:
         store.upsert_archive_manifest(
             archive_url=url, exchange_id="binance", market_type="spot",
@@ -237,7 +237,7 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
         store._connection.execute(
             """UPDATE records SET payload_json=?, timestamp_ms=1704067260000
                WHERE exchange_id='binance' AND market_type='spot'
-                 AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='60000'""",
+                 AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='1704067200000'""",
             ('{"close":"1"}',),
         )
         store._connection.commit()
@@ -251,7 +251,7 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
 
 def test_archive_batch_rejects_verified_manifest_row_count_mismatch(tmp_path: Path) -> None:
     url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
-    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
+    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 1_704_067_200_000, "1704067200000", {"close": "1"})
     with SQLiteStore(tmp_path / "row-count.sqlite3") as store:
         store.upsert_archive_manifest(
             archive_url=url, exchange_id="binance", market_type="spot",
