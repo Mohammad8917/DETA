@@ -157,3 +157,24 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
 
         with pytest.raises(ValueError, match="must be verified"):
             store.update_archive_manifest(url, status="imported", checksum_sha256="c" * 64)
+
+
+def test_record_timestamps_are_bounded_distinct_and_sorted(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        records = [
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 120_000, "b", {}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "a", {}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 180_000, "c", {}),
+            DataRecord("binance", "spot", "klines_1m", "ETHUSDT", 120_000, "other", {}),
+        ]
+        store.save_batch(records[:3], cursor="180000")
+        store.save_batch([records[3]], cursor="120000")
+        assert store.record_timestamps(
+            exchange_id="binance", market_type="spot", data_type="klines_1m",
+            symbol="BTCUSDT", start_ms=60_000, end_ms=120_000,
+        ) == [60_000, 120_000]
+        with pytest.raises(ValueError, match="Invalid timestamp range"):
+            store.record_timestamps(
+                exchange_id="binance", market_type="spot", data_type="klines_1m",
+                symbol="BTCUSDT", start_ms=120_000, end_ms=60_000,
+            )
