@@ -234,6 +234,14 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
         )
         store._connection.commit()
         assert store.archive_provenance_summary(url)["payload_hash_mismatches"] == 1
+        store._connection.execute(
+            """UPDATE records SET payload_json=?, timestamp_ms=120000
+               WHERE exchange_id='binance' AND market_type='spot'
+                 AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='60000'""",
+            ('{"close":"1"}',),
+        )
+        store._connection.commit()
+        assert store.archive_provenance_summary(url)["timestamp_mismatches"] == 1
         store._connection.execute("DELETE FROM records")
         store._connection.commit()
         summary = store.archive_provenance_summary(url)
