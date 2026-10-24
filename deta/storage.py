@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -199,7 +200,7 @@ class SQLiteStore:
                    ON CONFLICT(archive_url, record_key) DO UPDATE SET
                        timestamp_ms=excluded.timestamp_ms, payload_sha256=excluded.payload_sha256""",
                 [(archive_url, *identity, r.record_key, r.timestamp_ms,
-                  __import__("hashlib").sha256(
+                  hashlib.sha256(
                       json.dumps(r.payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
                   ).hexdigest()) for r in records],
             )
