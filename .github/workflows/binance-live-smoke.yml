@@ -62,6 +62,7 @@ jobs:
         run: |
           if [[ -f artifacts/live-smoke.sqlite3 ]]; then
             python -m deta.cli --db artifacts/live-smoke.sqlite3 status | tee artifacts/status.json
+            python -m deta.cli --db artifacts/live-smoke.sqlite3 archive-manifest | tee artifacts/archive-manifest.json
           fi
       - uses: actions/upload-artifact@v4
         if: always()
