@@ -831,6 +831,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 missing_checksum = [url for url in source_urls
                     if url in by_url and (not by_url[url]["checksum_sha256"]
                         or by_url[url]["size_bytes"] is None)]
+                manifest_not_listed = [
+                    str(entry["archive_url"]) for entry in scoped_manifest
+                    if str(entry["archive_url"]) not in listed
+                ]
                 print(json.dumps({
                     "exchange": "binance", "market": args.market,
                     "market_type": market_type, "symbol": args.symbol,
@@ -844,16 +848,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "imported_archives": imported,
                     "discovered_or_downloaded": discovered_or_downloaded,
                     "missing_checksum_or_size": missing_checksum,
-                    "manifest_entries_not_in_current_source_listing": [
-                        str(entry["archive_url"]) for entry in scoped_manifest
-                        if str(entry["archive_url"]) not in listed
-                    ],
+                    "manifest_entries_not_in_current_source_listing": manifest_not_listed,
                     "coverage_claim": (
                         "This reconciles the current official monthly/daily source listing against the local manifest only. "
                         "It cannot prove that the source listing itself is exhaustive or that imported rows cover every expected timestamp."
                     ),
                 }, indent=2, ensure_ascii=False))
-                return 0 if source_urls else 1
+                # Fail closed for direct CLI callers as well as the live-smoke workflow.
+                # A non-empty source listing is not sufficient if the manifest disagrees.
+                reconciliation_passed = (
+                    bool(source_urls)
+                    and not missing_manifest
+                    and not verified_not_imported
+                    and not failed
+                    and not discovered_or_downloaded
+                    and not missing_checksum
+                    and not manifest_not_listed
+                    and len(imported) == len(source_urls)
+                )
+                return 0 if reconciliation_passed else 1
             finally:
                 archive.close()
         if args.command == "backfill-archive-klines":
