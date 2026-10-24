@@ -29,6 +29,7 @@ class FakeSource:
 
 class FakeArchive:
     def __init__(self, market: str) -> None:
+        self.market_type = {"spot": "spot", "usd-m": "usd_m", "coin-m": "coin_m"}[market]
         self.last_verified_checksum_sha256: str | None = None
         self.last_verified_size_bytes: int | None = None
         self.should_fail = False
