@@ -31,6 +31,14 @@ def test_kline_normalization_preserves_native_fields() -> None:
     adapter.close()
 
 
+
+def test_spot_kline_iterator_excludes_unclosed_candle() -> None:
+    row = [9999999990000, "1", "3", "0.5", "2", "10", 9999999999999, "20", 4, "6", "12", "0"]
+    adapter = BinanceSpotAdapter(client=MockClient([row]), request_pause=0)
+    assert list(adapter.iter_klines("ABCUSDT", "1m", 0)) == []
+    adapter.close()
+
+
 def test_aggregate_trades_uses_time_then_id_cursor_and_streams_pages() -> None:
     adapter = BinanceSpotAdapter(client=MockClient([]), request_pause=0)
     calls: list[dict[str, Any]] = []
