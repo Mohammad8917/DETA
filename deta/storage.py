@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -169,14 +171,14 @@ class SQLiteStore:
         if not records:
             raise ValueError("Empty archive batches cannot be imported")
         manifest = self._connection.execute(
-            """SELECT exchange_id, market_type, data_type, symbol, status,
+            """SELECT exchange_id, market_type, data_type, symbol, archive_period, status,
                       checksum_sha256, size_bytes, row_count
                FROM archive_manifest WHERE archive_url=?""",
             (archive_url,),
         ).fetchone()
         if manifest is None:
             raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
-        (exchange_id, market_type, data_type, symbol, manifest_status,
+        (exchange_id, market_type, data_type, symbol, archive_period, manifest_status,
          checksum_sha256, size_bytes, manifest_row_count) = manifest
         if manifest_status != "verified":
             raise ValueError("Archive must be verified before its records can be imported")
@@ -193,6 +195,18 @@ class SQLiteStore:
         identity = (exchange_id, market_type, data_type, symbol)
         if any((r.exchange_id, r.market_type, r.data_type, r.symbol) != identity for r in records):
             raise ValueError("Archive records do not match the manifest dataset identity")
+        if re.fullmatch(r"\d{4}-\d{2}", archive_period):
+            period_start = datetime.strptime(archive_period, "%Y-%m").replace(tzinfo=timezone.utc)
+            period_end = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", archive_period):
+            period_start = datetime.strptime(archive_period, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            period_end = period_start + timedelta(days=1)
+        else:
+            raise ValueError("Archive period must be a valid UTC month or day")
+        start_ms = int(period_start.timestamp() * 1000)
+        end_ms = int(period_end.timestamp() * 1000)
+        if any(not start_ms <= record.timestamp_ms < end_ms for record in records):
+            raise ValueError("Archive contains records outside its declared UTC period")
         with self._connection:
             before_records = self._connection.total_changes
             self._connection.executemany(
