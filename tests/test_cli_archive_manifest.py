@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from deta.domain import DataRecord
@@ -274,3 +275,25 @@ def test_price_kline_import_marks_manifest_failed_on_archive_verification_failur
         assert manifest[0]["status"] == "failed"
         assert "checksum mismatch" in manifest[0]["error"]
         assert manifest[0]["imported_at"] is None
+
+
+def test_archive_manifest_cli_reports_status_counts(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "data.sqlite3"
+    with SQLiteStore(database) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="discovered",
+        )
+    result = cli.main([
+        "--db", str(database), "archive-manifest", "--market-type", "spot",
+        "--symbol", "BTCUSDT",
+    ])
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["archive_count"] == 1
+    assert report["status_counts"] == {"discovered": 1}
+    assert report["archives"][0]["archive_url"] == ARCHIVE_URL
+    assert "not proof" in report["coverage_claim"]
