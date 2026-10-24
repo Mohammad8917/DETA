@@ -376,14 +376,33 @@ class SQLiteStore:
             raise ValueError("Archive checksum must be a 64-character SHA-256 hex digest")
         with self._connection:
             existing = self._connection.execute(
-                "SELECT checksum_sha256, status FROM archive_manifest WHERE archive_url=?",
+                """SELECT checksum_sha256, status, exchange_id, market_type, data_type,
+                          symbol, archive_period
+                   FROM archive_manifest WHERE archive_url=?""",
                 (archive_url,),
             ).fetchone()
+            if existing is not None:
+                (
+                    previous_checksum, previous_status, previous_exchange,
+                    previous_market, previous_data_type, previous_symbol, previous_period,
+                ) = existing
+                previous_identity = (
+                    previous_exchange, previous_market, previous_data_type,
+                    previous_symbol, previous_period,
+                )
+                incoming_identity = (
+                    exchange_id, market_type, data_type, symbol, archive_period,
+                )
+                if incoming_identity != previous_identity:
+                    raise ValueError(
+                        "Archive URL identity is immutable; use the URL that matches its dataset and period"
+                    )
+            else:
+                previous_checksum = previous_status = None
             checksum_changed = (
-                existing is not None
+                previous_checksum is not None
                 and checksum_sha256 is not None
-                and existing[0] is not None
-                and checksum_sha256.lower() != str(existing[0]).lower()
+                and checksum_sha256.lower() != str(previous_checksum).lower()
             )
             if checksum_changed and status == "imported":
                 raise ValueError("A changed archive checksum must be verified before it can be marked imported")
@@ -408,8 +427,10 @@ class SQLiteStore:
                             AND archive_manifest.checksum_sha256 IS NOT NULL
                             AND lower(excluded.checksum_sha256) != lower(archive_manifest.checksum_sha256)
                            THEN excluded.status
-                           WHEN archive_manifest.status='imported' AND excluded.status='discovered'
-                           THEN archive_manifest.status ELSE excluded.status END,
+                           WHEN archive_manifest.status='imported'
+                            AND excluded.status IN ('discovered', 'downloaded', 'verified')
+                           THEN archive_manifest.status
+                           ELSE excluded.status END,
                        imported_at=CASE
                            WHEN excluded.checksum_sha256 IS NOT NULL
                             AND archive_manifest.checksum_sha256 IS NOT NULL
