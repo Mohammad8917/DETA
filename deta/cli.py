@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
+from io import StringIO
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
@@ -107,6 +109,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--start-month", required=True, help="Inclusive YYYY-MM")
     reconcile.add_argument("--end-month", required=True, help="Inclusive YYYY-MM")
+    reconcile_batch = commands.add_parser(
+        "reconcile-archive-klines-batch",
+        help="Reconcile official kline archive inventory across all discovered symbols and selected intervals",
+    )
+    reconcile_batch.add_argument("--market", choices=("spot", "usd-m", "coin-m"), required=True)
+    reconcile_batch.add_argument("--intervals", nargs="+", required=True,
+        choices=("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"))
+    reconcile_batch.add_argument("--symbols", nargs="*", help="Optional explicit symbols/contracts; default discovers official monthly and daily archive indexes")
+    reconcile_batch.add_argument("--start-month", required=True, help="Inclusive YYYY-MM")
+    reconcile_batch.add_argument("--end-month", required=True, help="Inclusive YYYY-MM")
     gap_audit = commands.add_parser(
         "audit-kline-gaps",
         help="Audit stored candle timestamp continuity in an explicit bounded UTC-millisecond range",
@@ -771,12 +783,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "backfill-archive-klines", "backfill-archive-agg-trades",
         "backfill-archive-trades", "backfill-archive-funding-rates",
         "backfill-archive-price-klines", "reconcile-archive-klines",
+        "reconcile-archive-klines-batch",
     }
     if args.command in month_commands:
         month_error = _validate_month_bounds(
             getattr(args, "start_month", None),
             getattr(args, "end_month", None),
-            require_both=args.command == "reconcile-archive-klines",
+            require_both=args.command in {"reconcile-archive-klines", "reconcile-archive-klines-batch"},
         )
         if month_error:
             log.error("%s", month_error)
@@ -900,6 +913,69 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "coverage_claim": "Manifest and provenance audit do not by themselves prove exhaustive source coverage.",
             }, indent=2, ensure_ascii=False))
             return 1 if imported_audit_failures else 0
+        if args.command == "reconcile-archive-klines-batch":
+            discovery = BinanceArchiveAdapter(args.market)
+            try:
+                if args.symbols:
+                    symbols = sorted(set(args.symbols))
+                else:
+                    monthly_symbols = discovery.list_archive_symbols("klines", "monthly")
+                    daily_symbols = discovery.list_archive_symbols("klines", "daily")
+                    symbols = sorted(set(monthly_symbols) | set(daily_symbols))
+            finally:
+                discovery.close()
+            if not symbols:
+                print(json.dumps({
+                    "exchange": "binance", "market": args.market,
+                    "requested_months": {"start": args.start_month, "end": args.end_month},
+                    "symbols_attempted": 0, "intervals_requested": args.intervals,
+                    "datasets_checked": 0, "datasets_passed": 0, "datasets_failed": [],
+                    "coverage_claim": "No symbol was discovered or explicitly supplied; no coverage was proven.",
+                }, indent=2, ensure_ascii=False))
+                return 1
+            results: list[dict[str, object]] = []
+            for symbol in symbols:
+                for interval in args.intervals:
+                    captured = StringIO()
+                    try:
+                        with redirect_stdout(captured):
+                            exit_code = main([
+                                "--db", str(args.db), "--log-level", args.log_level,
+                                "reconcile-archive-klines", "--market", args.market,
+                                "--symbol", symbol, "--interval", interval,
+                                "--start-month", args.start_month, "--end-month", args.end_month,
+                            ])
+                        report = json.loads(captured.getvalue())
+                        results.append({
+                            "symbol": symbol, "interval": interval,
+                            "exit_code": exit_code, "report": report,
+                        })
+                    except Exception as exc:
+                        results.append({
+                            "symbol": symbol, "interval": interval, "exit_code": 1,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        })
+            failed = [
+                {"symbol": item["symbol"], "interval": item["interval"],
+                 "reason": item.get("error", "reconciliation reported unresolved differences")}
+                for item in results if item["exit_code"] != 0
+            ]
+            passed = len(results) - len(failed)
+            print(json.dumps({
+                "exchange": "binance", "market": args.market,
+                "requested_months": {"start": args.start_month, "end": args.end_month},
+                "symbols_attempted": len(symbols), "symbols": symbols,
+                "intervals_requested": args.intervals,
+                "datasets_checked": len(results), "datasets_passed": passed,
+                "datasets_failed": failed, "results": results,
+                "coverage_claim": (
+                    "This batch reconciles current official monthly/daily source listings against the local manifest "
+                    "for each requested symbol and interval. It does not prove the source inventory is exhaustive, "
+                    "does not audit candle timestamp continuity or OHLCV payloads, and does not imply success for "
+                    "symbols or intervals outside this report."
+                ),
+            }, indent=2, ensure_ascii=False))
+            return 0 if results and not failed else 1
         if args.command == "reconcile-archive-klines":
             archive = BinanceArchiveAdapter(args.market)
             try:
