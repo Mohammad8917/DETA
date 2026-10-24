@@ -619,6 +619,29 @@ class SQLiteStore:
         ).fetchall()
         return [int(row[0]) for row in rows]
 
+    def record_payloads(
+        self, *, exchange_id: str, market_type: str, data_type: str, symbol: str,
+        start_ms: int, end_ms: int,
+    ) -> list[dict[str, Any]]:
+        """Read all stored record payloads for one bounded dataset window."""
+        if start_ms < 0 or end_ms < start_ms:
+            raise ValueError("Invalid timestamp range")
+        rows = self._connection.execute(
+            """SELECT timestamp_ms, record_key, payload_json FROM records
+               WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
+                 AND timestamp_ms>=? AND timestamp_ms<=?
+               ORDER BY timestamp_ms, record_key""",
+            (exchange_id, market_type, data_type, symbol, start_ms, end_ms),
+        ).fetchall()
+        return [
+            {
+                "timestamp_ms": int(row[0]),
+                "record_key": str(row[1]),
+                "payload": json.loads(row[2]),
+            }
+            for row in rows
+        ]
+
     def dataset_summary(self) -> list[dict[str, Any]]:
         """Include attempted datasets even when their first request yielded no records."""
         rows = self._connection.execute(
