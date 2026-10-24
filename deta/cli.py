@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import re
@@ -842,6 +842,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if not isinstance(by_url[url]["imported_at"], str)
                     or not by_url[url]["imported_at"].strip()
                 ]
+                # A manifest row saying "imported" is not sufficient: compare the
+                # archive's recorded row count with distinct timestamps actually stored
+                # for that exact archive period. Kline archives have one row per open time.
+                imported_row_count_mismatches: list[dict[str, object]] = []
+                for url in imported:
+                    entry = by_url[url]
+                    period = str(entry["archive_period"])
+                    try:
+                        if re.fullmatch(r"\\d{4}-\\d{2}", period):
+                            period_start = datetime.strptime(period, "%Y-%m").replace(tzinfo=timezone.utc)
+                            next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+                            period_end = next_month
+                        elif re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", period):
+                            period_start = datetime.strptime(period, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            period_end = period_start + timedelta(days=1)
+                        else:
+                            raise ValueError("unsupported archive period format")
+                        start_ms = int(period_start.timestamp() * 1000)
+                        end_ms = int(period_end.timestamp() * 1000) - 1
+                        stored_count = len(store.record_timestamps(
+                            exchange_id="binance", market_type=market_type,
+                            data_type=data_type, symbol=args.symbol,
+                            start_ms=start_ms, end_ms=end_ms,
+                        ))
+                        manifest_count = entry["row_count"]
+                        if not isinstance(manifest_count, int) or manifest_count < 0 or stored_count != manifest_count:
+                            imported_row_count_mismatches.append({
+                                "archive_url": url,
+                                "archive_period": period,
+                                "manifest_row_count": manifest_count,
+                                "stored_distinct_timestamp_count": stored_count,
+                            })
+                    except (ValueError, OverflowError, OSError) as exc:
+                        imported_row_count_mismatches.append({
+                            "archive_url": url,
+                            "archive_period": period,
+                            "error": str(exc),
+                        })
                 manifest_not_listed = [
                     str(entry["archive_url"]) for entry in scoped_manifest
                     if str(entry["archive_url"]) not in listed
@@ -860,6 +898,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "discovered_or_downloaded": discovered_or_downloaded,
                     "missing_checksum_or_size": missing_checksum,
                     "missing_import_timestamp": missing_import_timestamp,
+                    "imported_row_count_mismatches": imported_row_count_mismatches,
                     "manifest_entries_not_in_current_source_listing": manifest_not_listed,
                     "coverage_claim": (
                         "This reconciles the current official monthly/daily source listing against the local manifest only. "
@@ -876,6 +915,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     and not discovered_or_downloaded
                     and not missing_checksum
                     and not missing_import_timestamp
+                    and not imported_row_count_mismatches
                     and not manifest_not_listed
                     and len(imported) == len(source_urls)
                 )
