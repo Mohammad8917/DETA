@@ -293,6 +293,21 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
         assert summary["stored_record_rows"] == 0
 
 
+def test_manifest_cannot_be_marked_imported_without_matching_provenance(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    with SQLiteStore(tmp_path / "unproven-import.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        with pytest.raises(ValueError, match="provenance"):
+            store.update_archive_manifest(url, status="imported")
+        assert store.archive_manifest_summary()[0]["status"] == "verified"
+
+
 def test_archive_batch_rejects_verified_manifest_row_count_mismatch(tmp_path: Path) -> None:
     url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
     record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 1_704_067_200_000, "1704067200000", {"close": "1"})
