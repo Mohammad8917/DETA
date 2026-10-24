@@ -161,6 +161,19 @@ class SQLiteStore:
                    updated_at=CURRENT_TIMESTAMP""",
                 (*identity, cursor, status, detail),
             )
+            # Commit the archive state in the SAME transaction as records, provenance,
+            # and checkpoint. A crash cannot leave a committed import marked only verified.
+            imported_at = datetime.now(timezone.utc).isoformat()
+            updated = self._connection.execute(
+                """UPDATE archive_manifest
+                   SET status='imported', imported_at=?, row_count=?, error='',
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE archive_url=? AND status IN ('verified', 'imported')
+                     AND lower(checksum_sha256)=lower(?)""",
+                (imported_at, len(records), archive_url, checksum_sha256),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Archive manifest changed during import; transaction aborted")
             return inserted_rows
 
     def save_archive_batch(
@@ -195,6 +208,9 @@ class SQLiteStore:
         identity = (exchange_id, market_type, data_type, symbol)
         if any((r.exchange_id, r.market_type, r.data_type, r.symbol) != identity for r in records):
             raise ValueError("Archive records do not match the manifest dataset identity")
+        record_keys = [record.record_key for record in records]
+        if len(set(record_keys)) != len(record_keys):
+            raise ValueError("Archive contains duplicate record keys; refusing ambiguous import")
         if re.fullmatch(r"\d{4}-\d{2}", archive_period):
             period_start = datetime.strptime(archive_period, "%Y-%m").replace(tzinfo=timezone.utc)
             period_end = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
