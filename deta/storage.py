@@ -169,15 +169,27 @@ class SQLiteStore:
         if not records:
             raise ValueError("Empty archive batches cannot be imported")
         manifest = self._connection.execute(
-            """SELECT exchange_id, market_type, data_type, symbol, status
+            """SELECT exchange_id, market_type, data_type, symbol, status,
+                      checksum_sha256, size_bytes, row_count
                FROM archive_manifest WHERE archive_url=?""",
             (archive_url,),
         ).fetchone()
         if manifest is None:
             raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
-        exchange_id, market_type, data_type, symbol, manifest_status = manifest
+        (exchange_id, market_type, data_type, symbol, manifest_status,
+         checksum_sha256, size_bytes, manifest_row_count) = manifest
         if manifest_status != "verified":
             raise ValueError("Archive must be verified before its records can be imported")
+        if (
+            not isinstance(checksum_sha256, str)
+            or len(checksum_sha256) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in checksum_sha256)
+            or not isinstance(size_bytes, int)
+            or size_bytes <= 0
+        ):
+            raise ValueError("Archive integrity metadata must be valid before import")
+        if not isinstance(manifest_row_count, int) or manifest_row_count != len(records):
+            raise ValueError("Archive record count does not match verified manifest row_count")
         identity = (exchange_id, market_type, data_type, symbol)
         if any((r.exchange_id, r.market_type, r.data_type, r.symbol) != identity for r in records):
             raise ValueError("Archive records do not match the manifest dataset identity")
