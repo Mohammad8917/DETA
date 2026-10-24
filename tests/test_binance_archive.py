@@ -382,6 +382,61 @@ def test_archive_symbol_discovery_follows_s3_continuation_tokens() -> None:
     adapter.close()
 
 
+@pytest.mark.parametrize(
+    ("xml", "message"),
+    [
+        ("<Error><Message>AccessDenied</Message></Error>", "expected ListBucketResult"),
+        (
+            "<ListBucketResult><IsTruncated>true</IsTruncated>"
+            "<CommonPrefixes><Prefix>data/spot/monthly/klines/BTCUSDT/</Prefix>"
+            "</CommonPrefixes></ListBucketResult>",
+            "truncated but has no NextContinuationToken",
+        ),
+        ("<ListBucketResult><CommonPrefixes /></ListBucketResult>", "invalid IsTruncated"),
+    ],
+)
+def test_s3_archive_listing_rejects_incomplete_or_unexpected_responses(
+    xml: str, message: str,
+) -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/klines/"
+    s3_listing = (
+        "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        "?list-type=2&prefix=data%2Fspot%2Fmonthly%2Fklines%2F&delimiter=%2F"
+    )
+    client = MockClient({
+        directory: "<html>JavaScript loads entries</html>",
+        s3_listing: xml,
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    with pytest.raises(RuntimeError, match=message):
+        adapter.list_archive_symbols("klines")
+    adapter.close()
+
+
+def test_s3_archive_listing_404_is_not_treated_as_empty_inventory() -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/klines/"
+    s3_listing = (
+        "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        "?list-type=2&prefix=data%2Fspot%2Fmonthly%2Fklines%2F&delimiter=%2F"
+    )
+
+    class NotFoundS3Client(MockClient):
+        def get(self, url: str) -> httpx.Response:
+            self.calls.append(url)
+            request = httpx.Request("GET", url)
+            if url == s3_listing:
+                return httpx.Response(404, request=request)
+            return httpx.Response(
+                200, text="<html>JavaScript loads entries</html>", request=request,
+            )
+
+    client = NotFoundS3Client({})
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    with pytest.raises(RuntimeError, match="source inventory cannot be verified"):
+        adapter.list_archive_symbols("klines")
+    adapter.close()
+
+
 def test_verified_archive_exposes_exact_checksum_and_byte_size() -> None:
     url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
     payload = make_zip(
