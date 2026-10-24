@@ -632,6 +632,48 @@ def test_audit_kline_gaps_detects_off_grid_timestamp(
     assert report["unexpected_off_grid_timestamps"] == [30_000]
 
 
+def test_audit_kline_gaps_fails_when_no_candles_are_stored(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "empty-range.sqlite3"
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "120000",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["expected_candles"] == 3
+    assert report["stored_timestamp_rows"] == 0
+    assert report["missing_candle_count"] == 3
+    assert report["first_stored_timestamp_ms"] is None
+    assert report["last_stored_timestamp_ms"] is None
+
+
+def test_audit_kline_gaps_detects_duplicate_timestamp_outside_expected_grid(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "duplicate-off-grid.sqlite3"
+    with SQLiteStore(database) as store:
+        store.save_batch([
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 0, "row-a", {"close": "1"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 30_000, "row-b", {"close": "1.5"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 30_000, "row-c", {"close": "1.6"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "row-d", {"close": "2"}),
+        ], cursor="60001")
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "60000",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_candle_count"] == 0
+    assert report["duplicate_timestamp_count"] == 1
+    assert report["first_duplicate_timestamps_ms"] == [30_000]
+    assert report["unexpected_off_grid_timestamps"] == [30_000]
+
+
 def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, caplog) -> None:
     result = cli.main([
         "--db", str(tmp_path / "data.sqlite3"), "audit-kline-gaps",
