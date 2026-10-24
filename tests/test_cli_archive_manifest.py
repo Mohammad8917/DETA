@@ -879,4 +879,4 @@ def test_two_year_coverage_workflow_uses_supported_cli_contract() -> None:
     ):
         assert report_field in workflow
 
-    assert "coverage proof workflow" in workflow.lower()
+    assert "two-year bounded coverage proof" in workflow.lower()
