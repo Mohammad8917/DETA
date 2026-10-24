@@ -18,17 +18,17 @@ This file is the source of truth for which Binance DETA behaviours are frozen an
 - **Important limitation:** run 40076813519 was triggered by a push and ran the unit-test workflow. It did **not** execute `binance-live-smoke.yml`. The live smoke workflow remains undispatched, so there is no new live-source evidence and no two-year/all-symbol coverage claim.
 - This gate is intentionally narrow: it checks archive listing/Manifest reconciliation for one market, symbol, interval, and month. It does not prove source inventory exhaustiveness, row-level candle correctness, timestamp continuity, or coverage of trades/funding/price-index datasets.
 
-## Storage and archive-provenance hardening — implemented, CI not yet confirmed
+## Storage and archive-provenance hardening — unit-verified (2026-10-24)
 
 The latest storage changes add a per-archive provenance audit for every imported archive family, not only native klines:
 
 - `save_archive_batch` now commits stored records, archive-to-record provenance, checkpoint progress, and the Manifest transition to `imported` in one SQLite transaction. If the Manifest checksum/status no longer matches, the transaction aborts rather than leaving partial import evidence.
 - The importer rejects duplicate record keys within one archive, row-count mismatches, invalid integrity metadata, and records whose timestamps fall outside the declared UTC month/day.
-- Re-importing identical bytes is idempotent. If the official checksum changes, old provenance is invalidated; after the new archive is verified, existing rows with the same record key are refreshed from the new archive payload and provenance is rebuilt. The reported `new_rows_saved` count counts genuinely new keys, not updates.
+- Re-importing identical bytes is idempotent. If the official checksum changes, old provenance is invalidated and rows owned only by that archive are removed. If a same-key row still exists with a different timestamp or canonical payload (for example, because another archive also references it), import fails closed rather than silently overwriting it. The reported `new_rows_saved` count counts genuinely new keys.
 - `archive-manifest` now audits provenance counts, stored-record existence, timestamp equality, and canonical payload hashes for every entry marked `imported`. It exits non-zero if any imported entry fails this audit. Existing imported Manifest entries without provenance will intentionally fail this stronger audit until they are re-imported and provenance is rebuilt.
 - Regression tests were added for missing records, changed payloads/timestamps, changed checksums, duplicate keys, period boundaries, row-count mismatch, and the manifest audit command.
 
-**Evidence boundary:** these are code changes and regression tests committed to `main`; the latest GitHub connector response did not expose a verifiable CI run for the latest push. Do not describe these tests as passing until a corresponding GitHub Actions run is confirmed. This audit still does not prove exhaustive source inventory or uninterrupted historical coverage.
+**Evidence boundary:** GitHub Actions run [40102158389](https://github.com/Mohammad8917/DETA/actions/runs/40102158389) completed successfully for commit `6dbd3e010a76cd35e25f4c3a98d7c4aacc5a41a3` with **88 tests passed**. This verifies the unit-test suite, including archive transaction rollback and batched conflict checks. It still does not prove exhaustive source inventory or uninterrupted historical coverage.
 
 ## Current evidence snapshot
 
@@ -146,7 +146,7 @@ The user's scope is the complete set of supported historical data families and t
 - Reconciliation checks provenance row count, existence of every referenced stored record, stored timestamps, and canonical payload fingerprints. A manifest entry marked imported without corresponding records, or with altered payload/timestamp data, fails closed.
 - A changed archive checksum invalidates the prior import timestamp and deletes provenance for the old content version. Re-importing checksum-identical content remains idempotent.
 - Regression tests were added for missing records, altered payloads/timestamps, row-count mismatch, out-of-period daily records, checksum-change invalidation, and daily period parsing.
-- Evidence level: IMPLEMENTED; execution pending. These changes have been fetched back from GitHub and inspected, but the available commit-status/workflow-run queries did not return a CI result. Do not label these tests UNIT-VERIFIED until a real test run succeeds.
+- Evidence level: UNIT-VERIFIED. GitHub Actions run [40102158389](https://github.com/Mohammad8917/DETA/actions/runs/40102158389) passed 88 tests for commit `6dbd3e010a76cd35e25f4c3a98d7c4aacc5a41a3`. This is unit-test evidence only; no live-source or two-year coverage claim follows from it.
 - This gate proves the stored records match the records parsed from each imported archive. It does not by itself prove the source inventory is exhaustive, OHLCV values are semantically correct, or the complete two-year scope is covered.
 
 
@@ -161,3 +161,13 @@ The archive import path now has a stricter storage contract:
 - Reconciliation verifies the archive's provenance row count, the continued existence of each referenced database row, timestamps, and canonical payload fingerprints. Manifest status alone is not proof of import integrity.
 
 This hardening improves the integrity of the archive lifecycle. It does **not** establish complete two-year market coverage, prove that every official archive was listed, or substitute for a green CI run and a real-source verification run. Those claims remain unproven until supported by recorded execution evidence.
+
+
+## Latest CI confirmation — 2026-10-24
+
+- Commit: `6dbd3e010a76cd35e25f4c3a98d7c4aacc5a41a3`.
+- GitHub Actions run [40102158389](https://github.com/Mohammad8917/DETA/actions/runs/40102158389): **success**, 88 tests passed.
+- Added a regression test proving an injected checkpoint-write failure rolls back the archive records, provenance, checkpoint, and manifest status as one transaction.
+- Added checksum-change tests proving stale byte-size and row-count metadata are cleared when new content metadata has not yet been verified.
+- Optimized archive conflict checking to query existing rows in chunks instead of issuing one database query per record.
+- The next proof stage remains live official-source verification plus bounded source-to-manifest and timestamp-gap audits over the exact symbols, intervals, and date range. No full two-year coverage is claimed.
