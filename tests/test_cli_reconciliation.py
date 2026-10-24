@@ -139,6 +139,7 @@ def test_reconciliation_fails_when_manifest_says_imported_but_database_rows_are_
         "manifest_row_count": 10,
         "archive_provenance_rows": 10,
         "stored_record_rows_with_provenance": 0,
+        "timestamp_mismatches": 0,
         "payload_hash_mismatches": 0,
     }]
     assert exit_code == 1
