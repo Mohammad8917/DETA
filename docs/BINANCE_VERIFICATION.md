@@ -136,3 +136,16 @@ The user's scope is the complete set of supported historical data families and t
 - Regression tests were added for missing records, altered payloads/timestamps, row-count mismatch, out-of-period daily records, checksum-change invalidation, and daily period parsing.
 - Evidence level: IMPLEMENTED; execution pending. These changes have been fetched back from GitHub and inspected, but the available commit-status/workflow-run queries did not return a CI result. Do not label these tests UNIT-VERIFIED until a real test run succeeds.
 - This gate proves the stored records match the records parsed from each imported archive. It does not by itself prove the source inventory is exhaustive, OHLCV values are semantically correct, or the complete two-year scope is covered.
+
+
+## Archive storage lifecycle hardening (2026-10-24)
+
+The archive import path now has a stricter storage contract:
+
+- An archive is marked `imported` in the same SQLite transaction that writes its records, per-archive provenance fingerprints, and dataset checkpoint. A process interruption cannot commit those writes while leaving the manifest at `verified`.
+- The import rejects duplicate record keys, records outside the declared UTC archive period, invalid checksum/size metadata, and row-count mismatches before committing.
+- If a record key already exists, its timestamp and canonical JSON payload must match the archive row. A conflicting row aborts the transaction; the manifest is not marked imported.
+- When the archive checksum changes, stale provenance is invalidated and rows referenced only by that archive are removed transactionally. Rows still referenced by another archive are retained; if the new archive conflicts with those shared rows, import fails closed rather than silently overwriting data.
+- Reconciliation verifies the archive's provenance row count, the continued existence of each referenced database row, timestamps, and canonical payload fingerprints. Manifest status alone is not proof of import integrity.
+
+This hardening improves the integrity of the archive lifecycle. It does **not** establish complete two-year market coverage, prove that every official archive was listed, or substitute for a green CI run and a real-source verification run. Those claims remain unproven until supported by recorded execution evidence.
