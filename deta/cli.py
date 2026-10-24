@@ -854,6 +854,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         or manifest_count <= 0
                         or provenance["provenance_rows"] != manifest_count
                         or provenance["stored_record_rows"] != manifest_count
+                        or provenance["payload_hash_mismatches"] != 0
                     ):
                         imported_row_count_mismatches.append({
                             "archive_url": url,
@@ -861,6 +862,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "manifest_row_count": manifest_count,
                             "archive_provenance_rows": provenance["provenance_rows"],
                             "stored_record_rows_with_provenance": provenance["stored_record_rows"],
+                            "payload_hash_mismatches": provenance["payload_hash_mismatches"],
                         })
                 manifest_not_listed = [
                     str(entry["archive_url"]) for entry in scoped_manifest
