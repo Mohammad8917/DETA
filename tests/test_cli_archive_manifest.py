@@ -849,3 +849,34 @@ def test_live_smoke_workflow_uses_reconcile_cli_report_contract() -> None:
     assert 'report["requested_months"]["start"]' in workflow
     assert 'report["requested_months"]["end"]' in workflow
 
+
+
+
+def test_two_year_coverage_workflow_uses_supported_cli_contract() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    workflow = (
+        repository_root / ".github" / "workflows" / "binance-two-year-coverage.yml"
+    ).read_text(encoding="utf-8")
+    cli_source = (repository_root / "deta" / "cli.py").read_text(encoding="utf-8")
+
+    assert "exactly 24 calendar months" in workflow
+    for command in (
+        "backfill-archive-klines",
+        "reconcile-archive-klines",
+        "audit-kline-gaps",
+        "archive-manifest",
+    ):
+        assert command in workflow
+        assert command in cli_source
+
+    for report_field in (
+        "source_listed_archive_count",
+        "imported_archives",
+        "missing_candle_count",
+        "duplicate_timestamp_count",
+        "invalid_candle_payload_count",
+        "imported_provenance_audit_failures",
+    ):
+        assert report_field in workflow
+
+    assert "two-year bounded coverage proof" in workflow.lower()
