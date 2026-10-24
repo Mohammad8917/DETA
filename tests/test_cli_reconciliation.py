@@ -180,3 +180,28 @@ def test_reconciliation_fails_when_source_listing_is_empty(
     assert report["source_listed_archive_count"] == 0
     assert exit_code == 1
 
+
+def test_reconciliation_fails_when_imported_manifest_lacks_checksum_or_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "missing-integrity.sqlite3"
+    with SQLiteStore(db_path) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL,
+            exchange_id="binance",
+            market_type="spot",
+            data_type="klines_1m",
+            symbol="BTCUSDT",
+            archive_period="2024-01",
+            status="imported",
+            imported_at="2026-10-24T00:00:00+00:00",
+            row_count=10,
+        )
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    exit_code = cli.main(_args(db_path))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_checksum_or_size"] == [ARCHIVE_URL]
+    assert exit_code == 1
+
