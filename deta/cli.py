@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     gap_audit.add_argument("--market-type", choices=("spot", "usd_m", "coin_m"), required=True)
     gap_audit.add_argument("--symbol", required=True)
     gap_audit.add_argument(
-        "--interval", choices=("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"), required=True,
+        "--interval", choices=("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d"), required=True,
     )
     gap_audit.add_argument("--start-ms", type=int, required=True, help="Inclusive UTC Unix timestamp in milliseconds; must align to interval")
     gap_audit.add_argument("--end-ms", type=int, required=True, help="Inclusive UTC Unix timestamp in milliseconds; must align to interval")
@@ -732,7 +732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000,
                 "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000,
                 "8h": 28_800_000, "12h": 43_200_000, "1d": 86_400_000,
-                "3d": 259_200_000, "1w": 604_800_000,
+                "3d": 259_200_000,
             }[args.interval]
             if args.start_ms < 0 or args.end_ms < args.start_ms:
                 log.error("Invalid audit range: require 0 <= start-ms <= end-ms")
