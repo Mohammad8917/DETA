@@ -160,6 +160,20 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
         assert row["checksum_sha256"] == second_digest
         assert row["imported_at"] is None
         assert store.archive_provenance_summary(url)["provenance_rows"] == 0
+        summary = next(item for item in store.dataset_summary() if item["symbol"] == "BTCUSDT")
+        assert summary["rows"] == 0
+
+        # The new content version can now be imported without conflicting with stale rows.
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256=second_digest, size_bytes=101, row_count=1,
+        )
+        replacement = DataRecord(
+            "binance", "spot", "klines_1m", "BTCUSDT",
+            1_704_067_200_000, "1704067200000", {"close": "2"},
+        )
+        assert store.save_archive_batch(url, [replacement], cursor="1704067200001") == 1
+        assert store.archive_manifest_summary()[0]["status"] == "imported"
+        assert store.archive_provenance_summary(url)["payload_hash_mismatches"] == 0
 
         with pytest.raises(ValueError, match="must be verified"):
             store.update_archive_manifest(url, status="imported", checksum_sha256="c" * 64)
