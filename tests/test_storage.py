@@ -204,3 +204,34 @@ def test_checkpoint_resume_after_interruption_uses_last_committed_batch(tmp_path
             if item["symbol"] == "BTCUSDT" and item["data_type"] == "klines_1m"
         )
         assert summary["rows"] == 3
+
+
+def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_path: Path) -> None:
+    path = tmp_path / "provenance.sqlite3"
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
+    with SQLiteStore(path) as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="1970-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        assert store.save_archive_batch(url, [record], cursor="60001") == 1
+        assert store.archive_provenance_summary(url) == {
+            "provenance_rows": 1, "stored_record_rows": 1, "payload_hash_mismatches": 0,
+        }
+        store._connection.execute(
+            """UPDATE records SET payload_json=?
+               WHERE exchange_id='binance' AND market_type='spot'
+                 AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='60000'""",
+            ('{"close":"2"}',),
+        )
+        store._connection.commit()
+        assert store.archive_provenance_summary(url)["payload_hash_mismatches"] == 1
+        store._connection.execute("DELETE FROM records")
+        store._connection.commit()
+        summary = store.archive_provenance_summary(url)
+        assert summary["provenance_rows"] == 1
+        assert summary["stored_record_rows"] == 0
