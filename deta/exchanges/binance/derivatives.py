@@ -101,6 +101,8 @@ class BinanceDerivativesAdapter:
         if start_ms < 0 or (end_ms is not None and end_ms < start_ms):
             raise ValueError("Invalid kline time range")
         cursor = start_ms
+        # Freeze the cutoff for this iterator so a candle cannot become "closed" mid-page.
+        closed_before_ms = int(time.time() * 1000)
         while True:
             params: dict[str, Any] = {
                 "symbol": symbol, "interval": interval, "startTime": cursor, "limit": 1500
@@ -113,7 +115,11 @@ class BinanceDerivativesAdapter:
             records: list[DataRecord] = []
             for row in rows:
                 open_time = int(row[0])
+                close_time = int(row[6])
                 if end_ms is not None and open_time > end_ms:
+                    continue
+                # Do not persist the currently forming candle as final historical data.
+                if close_time >= closed_before_ms:
                     continue
                 payload = {
                     "interval": interval, "open_time_ms": open_time,
