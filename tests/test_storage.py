@@ -223,7 +223,8 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
         )
         assert store.save_archive_batch(url, [record], cursor="60001") == 1
         assert store.archive_provenance_summary(url) == {
-            "provenance_rows": 1, "stored_record_rows": 1, "payload_hash_mismatches": 0,
+            "provenance_rows": 1, "stored_record_rows": 1,
+            "timestamp_mismatches": 0, "payload_hash_mismatches": 0,
         }
         store._connection.execute(
             """UPDATE records SET payload_json=?
