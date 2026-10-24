@@ -136,6 +136,10 @@ class FakeDerivativesSource(FakeSource):
 
     def __init__(self, market: str) -> None:
         super().__init__()
+        assert market in {"usd-m", "coin-m"}
+
+    def __init__(self, market: str) -> None:
+        super().__init__()
 
 
 class FakeFundingArchive(FakeArchive):
