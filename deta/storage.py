@@ -504,6 +504,11 @@ class SQLiteStore:
                 # Re-discovery/re-download/re-verification is not itself proof that the
                 # already-imported, checksum-identical archive ceased to be imported.
                 effective_status = "imported"
+            if status == "imported" and previous_status != "imported":
+                raise ValueError(
+                    "Imported state can only be established atomically by save_archive_batch "
+                    "after provenance is written"
+                )
             if checksum_changed and status == "imported":
                 raise ValueError("A changed archive checksum must be verified before it can be marked imported")
             if status == "imported":
