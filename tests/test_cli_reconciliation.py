@@ -297,3 +297,12 @@ def test_reconciliation_rejects_zero_byte_archive_metadata(
     assert report["missing_checksum_or_size"] == [ARCHIVE_URL]
     assert exit_code == 1
 
+
+
+def test_archive_period_preserves_daily_date_while_month_helper_groups_it() -> None:
+    daily_url = (
+        "https://data.binance.vision/data/spot/daily/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2024-01-31.zip"
+    )
+    assert cli._archive_period(daily_url) == "2024-01-31"
+    assert cli._archive_month(daily_url) == "2024-01"
