@@ -98,7 +98,20 @@ def test_archive_manifest_persists_and_filters_states(tmp_path: Path) -> None:
         assert rows[0]["size_bytes"] == 1024
         assert rows[0]["row_count"] == 31
     with SQLiteStore(path) as reopened:
-        assert reopened.archive_manifest_summary()[0]["status"] == "imported"
+        persisted_manifest = reopened.archive_manifest_summary()
+        assert persisted_manifest[0]["status"] == "imported"
+        assert persisted_manifest[0]["row_count"] == 31
+        provenance = reopened.archive_provenance_summary(url)
+        assert provenance == {
+            "provenance_rows": 31,
+            "stored_record_rows": 31,
+            "timestamp_mismatches": 0,
+            "payload_hash_mismatches": 0,
+        }
+        assert reopened.get_checkpoint(
+            "binance", "spot", "klines_1m", "BTCUSDT"
+        ) == str(1_704_067_200_000 + 30 * 60_000 + 1)
+        assert reopened.dataset_summary()[0]["rows"] == 31
 
 
 def test_archive_manifest_rejects_invalid_metadata_and_orphan_updates(tmp_path: Path) -> None:
