@@ -68,12 +68,6 @@ def _register_imported_archive(db_path: Path) -> None:
             size_bytes=1234,
             row_count=10,
         )
-        store.update_archive_manifest(
-            ARCHIVE_URL,
-            status="imported",
-            imported_at="2026-10-24T00:00:00+00:00",
-            row_count=10,
-        )
         records = [
             DataRecord(
                 "binance", "spot", "klines_1m", "BTCUSDT",
@@ -82,7 +76,15 @@ def _register_imported_archive(db_path: Path) -> None:
             )
             for index in range(10)
         ]
-        store.save_batch(records, cursor=str(records[-1].timestamp_ms + 1))
+        store.save_archive_batch(
+            ARCHIVE_URL, records, cursor=str(records[-1].timestamp_ms + 1)
+        )
+        store.update_archive_manifest(
+            ARCHIVE_URL,
+            status="imported",
+            imported_at="2026-10-24T00:00:00+00:00",
+            row_count=10,
+        )
 
 
 def test_reconciliation_fails_when_source_archive_is_missing_from_manifest(
@@ -135,7 +137,9 @@ def test_reconciliation_fails_when_manifest_says_imported_but_database_rows_are_
         "archive_url": ARCHIVE_URL,
         "archive_period": "2024-01",
         "manifest_row_count": 10,
-        "stored_distinct_timestamp_count": 0,
+        "archive_provenance_rows": 10,
+        "stored_record_rows_with_provenance": 0,
+        "payload_hash_mismatches": 0,
     }]
     assert exit_code == 1
 
