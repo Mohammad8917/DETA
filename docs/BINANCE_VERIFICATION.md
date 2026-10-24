@@ -188,3 +188,11 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - GitHub Actions run [40106309902](https://github.com/Mohammad8917/DETA/actions/runs/40106309902) completed successfully: **93 tests passed**.
 - Commit `f8af54d59c8aac2eb22105bfb3036306ea394b6f` also makes the live-smoke workflow explicitly include missing import timestamps in its failure summary; its test workflow [40106317544](https://github.com/Mohammad8917/DETA/actions/runs/40106317544) completed successfully.
 - These are CI/unit-test results only. The live smoke workflow has not been dispatched in this session, so no live official-source import or two-year coverage result is claimed.
+
+## S3 source-inventory fail-closed checks — CI verified (2026-10-24)
+
+- The archive listing fallback now rejects unexpected XML response roots, HTTP 404 from the S3 inventory endpoint, missing/invalid `IsTruncated`, and a truncated listing without `NextContinuationToken`. These conditions previously could be mistaken for a complete or empty inventory.
+- Regression tests cover the unexpected response root, missing/invalid pagination metadata, and S3 listing 404.
+- GitHub Actions run [40107328179](https://github.com/Mohammad8917/DETA/actions/runs/40107328179) for commit `850c836c9996ee57e4b727a3e7f13800cb4bf651` reports **97 tests passed**.
+- A first test run exposed that the pagination guard had not landed in the tested file revision; the guard was reapplied against the current file and the full suite then passed. The earlier failed run [40107248462](https://github.com/Mohammad8917/DETA/actions/runs/40107248462) is not counted as passing evidence.
+- This hardens how source listings are interpreted; it still does not constitute a live Binance run or proof of two-year candle coverage.
