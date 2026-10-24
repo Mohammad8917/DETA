@@ -18,6 +18,18 @@ This file is the source of truth for which Binance DETA behaviours are frozen an
 - **Important limitation:** run 40076813519 was triggered by a push and ran the unit-test workflow. It did **not** execute `binance-live-smoke.yml`. The live smoke workflow remains undispatched, so there is no new live-source evidence and no two-year/all-symbol coverage claim.
 - This gate is intentionally narrow: it checks archive listing/Manifest reconciliation for one market, symbol, interval, and month. It does not prove source inventory exhaustiveness, row-level candle correctness, timestamp continuity, or coverage of trades/funding/price-index datasets.
 
+## Storage and archive-provenance hardening — implemented, CI not yet confirmed
+
+The latest storage changes add a per-archive provenance audit for every imported archive family, not only native klines:
+
+- `save_archive_batch` now commits stored records, archive-to-record provenance, checkpoint progress, and the Manifest transition to `imported` in one SQLite transaction. If the Manifest checksum/status no longer matches, the transaction aborts rather than leaving partial import evidence.
+- The importer rejects duplicate record keys within one archive, row-count mismatches, invalid integrity metadata, and records whose timestamps fall outside the declared UTC month/day.
+- Re-importing identical bytes is idempotent. If the official checksum changes, old provenance is invalidated; after the new archive is verified, existing rows with the same record key are refreshed from the new archive payload and provenance is rebuilt. The reported `new_rows_saved` count counts genuinely new keys, not updates.
+- `archive-manifest` now audits provenance counts, stored-record existence, timestamp equality, and canonical payload hashes for every entry marked `imported`. It exits non-zero if any imported entry fails this audit. Existing imported Manifest entries without provenance will intentionally fail this stronger audit until they are re-imported and provenance is rebuilt.
+- Regression tests were added for missing records, changed payloads/timestamps, changed checksums, duplicate keys, period boundaries, row-count mismatch, and the manifest audit command.
+
+**Evidence boundary:** these are code changes and regression tests committed to `main`; the latest GitHub connector response did not expose a verifiable CI run for the latest push. Do not describe these tests as passing until a corresponding GitHub Actions run is confirmed. This audit still does not prove exhaustive source inventory or uninterrupted historical coverage.
+
 ## Current evidence snapshot
 
 Repository revision assessed for this evidence snapshot: `b074f4ee0aa159747e35484d8a220354bea07d87` (2026-10-24).
