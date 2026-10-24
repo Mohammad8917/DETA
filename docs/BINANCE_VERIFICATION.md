@@ -10,6 +10,14 @@ This file is the source of truth for which Binance DETA behaviours are frozen an
 - Never label a dataset complete merely because an import command succeeded or a checkpoint advanced.
 - Keep DETA limited to historical public-data collection, validation, storage, reconciliation, and coverage reporting. No market analysis, signals, or trading execution.
 
+## Latest verification update — 2026-10-24
+
+- Current repository revision: `7c4d46a30407b63dc9ac395870dc1377ad301c98`.
+- Added a fail-closed gate to `.github/workflows/binance-live-smoke.yml`: after importing the requested one-month Spot/USD-M/COIN-M native 1-minute kline scope, the workflow compares the official source listing to the persisted archive Manifest and fails if source-listed archives are absent from the Manifest, verified-but-not-imported, failed, still discovered/downloaded, missing checksum/size, or inconsistent with the imported count. It also rejects an empty source listing.
+- Unit-test workflow run [40076813519](https://github.com/Mohammad8917/DETA/actions/runs/40076813519) completed successfully for this revision.
+- **Important limitation:** run 40076813519 was triggered by a push and ran the unit-test workflow. It did **not** execute `binance-live-smoke.yml`. The live smoke workflow remains undispatched, so there is no new live-source evidence and no two-year/all-symbol coverage claim.
+- This gate is intentionally narrow: it checks archive listing/Manifest reconciliation for one market, symbol, interval, and month. It does not prove source inventory exhaustiveness, row-level candle correctness, timestamp continuity, or coverage of trades/funding/price-index datasets.
+
 ## Current evidence snapshot
 
 Repository revision assessed for this evidence snapshot: `b074f4ee0aa159747e35484d8a220354bea07d87` (2026-10-24).
