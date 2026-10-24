@@ -223,15 +223,33 @@ class SQLiteStore:
                     (*identity, *chunk),
                 ).fetchall()
                 existing_keys.update(str(row[0]) for row in found)
+            # Never silently overwrite a conflicting row from an unrelated import.
+            # Same-key rows may be replayed idempotently only when their timestamp and
+            # canonical payload are identical. A changed archive checksum invalidates and
+            # removes its old, unshared rows before this method is called again.
+            for record in records:
+                stored = self._connection.execute(
+                    """SELECT timestamp_ms, payload_json FROM records
+                       WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
+                         AND record_key=?""",
+                    (*identity, record.record_key),
+                ).fetchone()
+                if stored is None:
+                    continue
+                canonical_payload = json.dumps(
+                    record.payload, ensure_ascii=False, sort_keys=True
+                )
+                if stored[0] != record.timestamp_ms or stored[1] != canonical_payload:
+                    raise RuntimeError(
+                        "Archive import conflicts with an existing stored record "
+                        f"for key {record.record_key}"
+                    )
             inserted_rows = len(record_keys) - len(existing_keys)
             self._connection.executemany(
                 """INSERT INTO records(exchange_id, market_type, data_type, symbol,
                    timestamp_ms, record_key, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(exchange_id, market_type, data_type, symbol, record_key)
-                   DO UPDATE SET timestamp_ms=excluded.timestamp_ms,
-                                 payload_json=excluded.payload_json
-                   WHERE records.timestamp_ms IS NOT excluded.timestamp_ms
-                      OR records.payload_json IS NOT excluded.payload_json""",
+                   DO NOTHING""",
                 [(r.exchange_id, r.market_type, r.data_type, r.symbol, r.timestamp_ms,
                   r.record_key, json.dumps(r.payload, ensure_ascii=False, sort_keys=True))
                  for r in records],
