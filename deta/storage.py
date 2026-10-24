@@ -223,6 +223,24 @@ class SQLiteStore:
                  for r in records],
             )
             inserted_rows = self._connection.total_changes - before_records
+            # INSERT OR IGNORE is safe only when a pre-existing record is byte-for-byte
+            # equivalent to the archive record. Otherwise the archive must not be marked
+            # imported while the database silently retains conflicting content.
+            for record in records:
+                stored = self._connection.execute(
+                    """SELECT timestamp_ms, payload_json FROM records
+                       WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
+                         AND record_key=?""",
+                    (*identity, record.record_key),
+                ).fetchone()
+                expected_payload = json.dumps(
+                    record.payload, ensure_ascii=False, sort_keys=True
+                )
+                if stored is None or stored[0] != record.timestamp_ms or stored[1] != expected_payload:
+                    raise RuntimeError(
+                        "Archive record conflicts with an existing stored record: "
+                        f"{record.record_key}"
+                    )
             self._connection.executemany(
                 """INSERT INTO archive_record_provenance(
                        archive_url, exchange_id, market_type, data_type, symbol,
