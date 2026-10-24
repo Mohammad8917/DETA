@@ -100,3 +100,21 @@ Update this ledger in the same change that upgrades any dataset family to LIVE-V
 - Storage lookup is scoped to the requested dataset and range and returns timestamps in ascending order. Supported market identifiers match the persisted DETA values: `spot`, `usd_m`, and `coin_m`.
 - Regression tests cover a missing 1-minute candle and rejection of a non-aligned range. The initial validation test failed because it inspected stderr rather than pytest's captured logger; commit `19c3552e` corrected the test to assert captured logging. CI run [40070504672](https://github.com/Mohammad8917/DETA/actions/runs/40070504672) passed.
 - **Evidence level: UNIT-VERIFIED only.** This audit proves timestamp continuity only for records already stored in the selected database and bounded range. It does not establish that Binance supplied every expected candle, validate OHLCV payload correctness, or prove historical archive completeness. No live audit result is claimed here.
+
+## Closed-candle REST filtering — unit-verified (2026-10-24)
+
+- Spot and USDⓈ-M/COIN-M Futures REST kline iterators filter rows whose exchange-provided close timestamp has not yet passed at iterator start. This prevents the currently forming candle from being emitted as finalized historical data.
+- Regression tests cover exclusion of a future/open candle in both Spot and Futures adapters.
+- Commits: `49aaf186bf65cda63750ad55be29ddd46f655127` (Spot adapter), `510ec729cff1e0f8d448567cb38a14150cf6485a` (derivatives adapter), `d2274df46ec2ce5559f0ef46c0e070696462fb9f` (Spot regression test), and `669f2505192a79294189e35be6b25f3a2ce78826` (Futures regression test).
+- GitHub Actions runs [40073462170](https://github.com/Mohammad8917/DETA/actions/runs/40073462170), [40073464925](https://github.com/Mohammad8917/DETA/actions/runs/40073464925), [40073477994](https://github.com/Mohammad8917/DETA/actions/runs/40073477994), and [40073481018](https://github.com/Mohammad8917/DETA/actions/runs/40073481018) all completed successfully.
+- **Evidence level: UNIT-VERIFIED only.** The tests do not validate Binance server-clock skew, all interval boundaries, pagination/resume edge cases, or completeness of any stored historical range. The implementation captures local wall-clock time once at iterator start; a live integration check and checkpoint-resume regression remain outstanding.
+
+## Required full-dataset coverage accounting — not yet complete
+
+The user's scope is the complete set of supported historical data families and their results, not candles alone. Progress must be tracked separately for each market and dataset family, without inferring coverage from a green CI run or from another dataset's status:
+
+- Spot: native klines, aggregate trades, and individual trades.
+- USDⓈ-M Futures: native klines, aggregate trades, individual trades, funding rates, mark-price klines, index-price klines, and premium-index klines.
+- COIN-M Futures: the same families only where the official source actually provides them; unsupported or unavailable combinations must be reported explicitly, not marked complete.
+- For every applicable family, the coverage report must distinguish source inventory, archives listed, archives checksum-verified, archives imported, records stored, first/last timestamp or trade ID, missing/failed archives, timestamp/identifier gaps, checkpoint/resume status, and evidence level. For trade datasets, gaps must not be treated as missing data solely because no trades occurred during a time interval.
+- A complete two-year result is not established until the relevant source inventory and local persisted data have been reconciled for the explicitly stated symbols/contracts, intervals, and date range. Current CI is unit-test evidence and does not constitute that reconciliation.
