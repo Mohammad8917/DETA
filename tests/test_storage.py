@@ -309,3 +309,50 @@ def test_archive_manifest_upsert_checksum_change_invalidates_provenance(tmp_path
         assert manifest["imported_at"] is None
         assert manifest["checksum_sha256"] == "b" * 64
         assert store.archive_provenance_summary(url)["provenance_rows"] == 0
+
+
+def test_archive_import_atomically_marks_manifest_imported(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord(
+        "binance", "spot", "klines_1m", "BTCUSDT",
+        1_704_067_200_000, "1704067200000", {"close": "1"},
+    )
+    with SQLiteStore(tmp_path / "atomic-import.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        assert store.save_archive_batch(url, [record], cursor="1704067200001") == 1
+        manifest = store.archive_manifest_summary()[0]
+        assert manifest["status"] == "imported"
+        assert isinstance(manifest["imported_at"], str) and manifest["imported_at"]
+        assert manifest["row_count"] == 1
+        assert store.archive_provenance_summary(url) == {
+            "provenance_rows": 1, "stored_record_rows": 1,
+            "timestamp_mismatches": 0, "payload_hash_mismatches": 0,
+        }
+        assert store.get_checkpoint("binance", "spot", "klines_1m", "BTCUSDT") == "1704067200001"
+
+
+def test_archive_import_rejects_duplicate_record_keys_before_writing(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord(
+        "binance", "spot", "klines_1m", "BTCUSDT",
+        1_704_067_200_000, "1704067200000", {"close": "1"},
+    )
+    with SQLiteStore(tmp_path / "duplicate-records.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=2,
+        )
+        with pytest.raises(ValueError, match="duplicate record keys"):
+            store.save_archive_batch(url, [record, record], cursor="1704067200001")
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 0
+        assert store.archive_manifest_summary()[0]["status"] == "verified"
+        assert store.dataset_summary() == []
