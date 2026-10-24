@@ -217,7 +217,8 @@ class SQLiteStore:
     def archive_provenance_summary(self, archive_url: str) -> dict[str, int]:
         """Verify archive provenance against stored record existence and payload fingerprints."""
         rows = self._connection.execute(
-            """SELECT p.record_key, p.payload_sha256, r.payload_json
+            """SELECT p.record_key, p.timestamp_ms, p.payload_sha256,
+                      r.timestamp_ms, r.payload_json
                FROM archive_record_provenance p
                LEFT JOIN records r
                  ON r.exchange_id=p.exchange_id AND r.market_type=p.market_type
@@ -228,16 +229,20 @@ class SQLiteStore:
         ).fetchall()
         stored_count = 0
         payload_mismatches = 0
-        for _record_key, expected_hash, payload_json in rows:
+        timestamp_mismatches = 0
+        for _record_key, expected_timestamp, expected_hash, stored_timestamp, payload_json in rows:
             if payload_json is None:
                 continue
             stored_count += 1
+            if stored_timestamp != expected_timestamp:
+                timestamp_mismatches += 1
             actual_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
             if actual_hash != expected_hash:
                 payload_mismatches += 1
         return {
             "provenance_rows": len(rows),
             "stored_record_rows": stored_count,
+            "timestamp_mismatches": timestamp_mismatches,
             "payload_hash_mismatches": payload_mismatches,
         }
 
