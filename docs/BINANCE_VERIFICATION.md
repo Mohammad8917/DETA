@@ -171,3 +171,13 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - Added checksum-change tests proving stale byte-size and row-count metadata are cleared when new content metadata has not yet been verified.
 - Optimized archive conflict checking to query existing rows in chunks instead of issuing one database query per record.
 - The next proof stage remains live official-source verification plus bounded source-to-manifest and timestamp-gap audits over the exact symbols, intervals, and date range. No full two-year coverage is claimed.
+
+
+## Archive month-range validation — unit-verified (2026-10-24)
+
+- Archive backfill commands and `reconcile-archive-klines` now validate `YYYY-MM` values as real calendar months before opening a source adapter or mutating the database.
+- Reconciliation requires both bounds; reversed ranges, impossible months (for example `2024-13`), and non-canonical month strings fail with exit code 2.
+- Regression tests explicitly assert that invalid ranges fail before source-adapter construction, so malformed input cannot accidentally trigger network activity.
+- GitHub Actions run [40105994365](https://github.com/Mohammad8917/DETA/actions/runs/40105994365) passed **92 tests** for commit `691668c02c2d0ddf66ee52b3448f86a26303ff72`.
+- An earlier run for the same test addition failed at test collection because the test module lacked its `pytest` import; the import was added and the subsequent run passed. The failed run is not represented as a successful test.
+- This is input-validation/unit-test evidence. It does not prove live archive inventory or historical data coverage.
