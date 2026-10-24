@@ -181,3 +181,10 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - GitHub Actions run [40105994365](https://github.com/Mohammad8917/DETA/actions/runs/40105994365) passed **92 tests** for commit `691668c02c2d0ddf66ee52b3448f86a26303ff72`.
 - An earlier run for the same test addition failed at test collection because the test module lacked its `pytest` import; the import was added and the subsequent run passed. The failed run is not represented as a successful test.
 - This is input-validation/unit-test evidence. It does not prove live archive inventory or historical data coverage.
+
+## Reconciliation fail-closed regression — CI verified (2026-10-24)
+
+- Commit `a8bd3fb8f97f90ea07fa6f25c97765333a6b74c0` adds a regression test that deliberately clears `imported_at` on an otherwise imported archive and verifies that `reconcile-archive-klines` exits nonzero and reports the affected archive.
+- GitHub Actions run [40106309902](https://github.com/Mohammad8917/DETA/actions/runs/40106309902) completed successfully: **93 tests passed**.
+- Commit `f8af54d59c8aac2eb22105bfb3036306ea394b6f` also makes the live-smoke workflow explicitly include missing import timestamps in its failure summary; its test workflow [40106317544](https://github.com/Mohammad8917/DETA/actions/runs/40106317544) completed successfully.
+- These are CI/unit-test results only. The live smoke workflow has not been dispatched in this session, so no live official-source import or two-year coverage result is claimed.
