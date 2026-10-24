@@ -78,6 +78,7 @@ jobs:
               "verified_but_not_imported": report["verified_but_not_imported"],
               "failed_archives": report["failed_archives"],
               "discovered_or_downloaded": report["discovered_or_downloaded"],
+              "non_importable_archives": report["non_importable_archives"],
               "missing_checksum_or_size": report["missing_checksum_or_size"],
               "missing_import_timestamp": report["missing_import_timestamp"],
               "imported_row_count_mismatches": report["imported_row_count_mismatches"],
