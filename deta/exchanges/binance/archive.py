@@ -111,10 +111,6 @@ class BinanceArchiveAdapter:
         A failed or malformed S3 listing fails closed rather than silently falling
         back to a potentially incomplete HTML result.
         """
-        # Fetch HTML only as a best-effort availability check; its links are not used
-        # as inventory evidence because the page does not guarantee completeness.
-        self._get(directory, allow_not_found=True)
-
         prefix = urlsplit(directory).path.lstrip("/")
         if not prefix.endswith("/"):
             prefix += "/"
