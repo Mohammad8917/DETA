@@ -72,9 +72,18 @@ def test_archive_manifest_persists_and_filters_states(tmp_path: Path) -> None:
         store.update_archive_manifest(
             url, status="verified", checksum_sha256=digest, size_bytes=1024, row_count=31,
         )
-        store.update_archive_manifest(
-            url, status="imported", imported_at="2026-10-24T00:00:00Z", row_count=31,
-        )
+        records = [
+            DataRecord(
+                "binance", "spot", "klines_1m", "BTCUSDT",
+                1_704_067_200_000 + index * 60_000,
+                str(1_704_067_200_000 + index * 60_000),
+                {"close": str(index)},
+            )
+            for index in range(31)
+        ]
+        assert store.save_archive_batch(
+            url, records, cursor=str(records[-1].timestamp_ms + 1)
+        ) == 31
         # Re-discovery must not silently downgrade an imported archive.
         store.upsert_archive_manifest(
             archive_url=url, exchange_id="binance", market_type="spot",
