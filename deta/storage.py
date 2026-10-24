@@ -161,19 +161,6 @@ class SQLiteStore:
                    updated_at=CURRENT_TIMESTAMP""",
                 (*identity, cursor, status, detail),
             )
-            # Commit the archive state in the SAME transaction as records, provenance,
-            # and checkpoint. A crash cannot leave a committed import marked only verified.
-            imported_at = datetime.now(timezone.utc).isoformat()
-            updated = self._connection.execute(
-                """UPDATE archive_manifest
-                   SET status='imported', imported_at=?, row_count=?, error='',
-                       updated_at=CURRENT_TIMESTAMP
-                   WHERE archive_url=? AND status IN ('verified', 'imported')
-                     AND lower(checksum_sha256)=lower(?)""",
-                (imported_at, len(records), archive_url, checksum_sha256),
-            )
-            if updated.rowcount != 1:
-                raise RuntimeError("Archive manifest changed during import; transaction aborted")
             return inserted_rows
 
     def save_archive_batch(
@@ -228,7 +215,9 @@ class SQLiteStore:
             self._connection.executemany(
                 """INSERT INTO records(exchange_id, market_type, data_type, symbol,
                    timestamp_ms, record_key, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(exchange_id, market_type, data_type, symbol, record_key) DO NOTHING""",
+                   ON CONFLICT(exchange_id, market_type, data_type, symbol, record_key)
+                   DO UPDATE SET timestamp_ms=excluded.timestamp_ms,
+                                 payload_json=excluded.payload_json""",
                 [(r.exchange_id, r.market_type, r.data_type, r.symbol, r.timestamp_ms,
                   r.record_key, json.dumps(r.payload, ensure_ascii=False, sort_keys=True))
                  for r in records],
@@ -254,6 +243,18 @@ class SQLiteStore:
                    updated_at=CURRENT_TIMESTAMP""",
                 (*identity, cursor, status, detail),
             )
+            # Manifest status, provenance, records, and checkpoint commit atomically.
+            imported_at = datetime.now(timezone.utc).isoformat()
+            updated = self._connection.execute(
+                """UPDATE archive_manifest
+                   SET status='imported', imported_at=?, row_count=?, error='',
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE archive_url=? AND status IN ('verified', 'imported')
+                     AND lower(checksum_sha256)=lower(?)""",
+                (imported_at, len(records), archive_url, checksum_sha256),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Archive manifest changed during import; transaction aborted")
             return inserted_rows
 
     def archive_provenance_summary(self, archive_url: str) -> dict[str, int]:
