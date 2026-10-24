@@ -389,9 +389,9 @@ def _backfill_archive_funding_rates(
                     cursor = _monotonic_cursor(
                         store, "binance", source.market_type, data_type, symbol, candidate_cursor
                     )
-                    inserted = store.save_batch(
-                        records, cursor=str(cursor), status="partial",
-                        detail="Official funding-rate archives imported; source coverage and gaps are not independently verified",
+                    inserted = store.save_archive_batch(
+                        url, records, cursor=str(cursor), status="partial",
+                        detail="Official funding-rate archives imported with per-archive provenance; source coverage and gaps are not independently verified",
                     )
                     store.update_archive_manifest(
                         url, status="imported", row_count=len(records),
@@ -518,9 +518,9 @@ def _backfill_archive_price_klines(
                         cursor = _monotonic_cursor(
                             store, "binance", source.market_type, data_type, symbol, last + 1
                         )
-                        inserted = store.save_batch(
-                            records, cursor=cursor, status="partial",
-                            detail=f"Official {price_type} archives imported; full coverage and gaps are not independently verified",
+                        inserted = store.save_archive_batch(
+                            url, records, cursor=cursor, status="partial",
+                            detail=f"Official {price_type} archives imported with per-archive provenance; full coverage and gaps are not independently verified",
                         )
                         store.update_archive_manifest(
                             url, status="imported", row_count=len(records),
@@ -655,9 +655,9 @@ def _backfill_archive_trade_dataset(
                     cursor = _monotonic_cursor(
                         store, "binance", market_type, dataset, symbol, candidate_cursor
                     )
-                    inserted = store.save_batch(
-                        records, cursor=cursor, status="partial",
-                        detail=f"Official {description} archives imported; source coverage and gaps are not yet independently verified",
+                    inserted = store.save_archive_batch(
+                        url, records, cursor=cursor, status="partial",
+                        detail=f"Official {description} archives imported with per-archive provenance; source coverage and gaps are not yet independently verified",
                     )
                     store.update_archive_manifest(
                         url, status="imported", row_count=len(records),
