@@ -509,7 +509,7 @@ def test_partial_html_inventory_is_ignored_in_favor_of_authoritative_s3_listing(
     assert adapter.list_monthly_archives(
         "BTCUSDT", "1m", start_month="2024-01", end_month="2024-02"
     ) == [directory + "BTCUSDT-1m-2024-01.zip"]
-    assert client.calls == [directory, s3_listing]
+    assert client.calls == [s3_listing]
     adapter.close()
 
 
