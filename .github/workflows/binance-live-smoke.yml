@@ -79,6 +79,7 @@ jobs:
               "failed_archives": report["failed_archives"],
               "discovered_or_downloaded": report["discovered_or_downloaded"],
               "missing_checksum_or_size": report["missing_checksum_or_size"],
+              "missing_import_timestamp": report["missing_import_timestamp"],
               "imported_row_count_mismatches": report["imported_row_count_mismatches"],
               "manifest_entries_not_in_current_source_listing": report[
                   "manifest_entries_not_in_current_source_listing"
