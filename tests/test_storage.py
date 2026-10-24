@@ -270,12 +270,12 @@ def test_archive_batch_rejects_verified_manifest_row_count_mismatch(tmp_path: Pa
 
 
 def test_archive_batch_rejects_timestamps_outside_declared_period(tmp_path: Path) -> None:
-    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    url = "https://data.binance.vision/data/spot/daily/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01-31.zip"
     record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
     with SQLiteStore(tmp_path / "period.sqlite3") as store:
         store.upsert_archive_manifest(
             archive_url=url, exchange_id="binance", market_type="spot",
-            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01-31",
         )
         store.update_archive_manifest(
             url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
