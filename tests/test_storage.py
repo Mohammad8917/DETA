@@ -284,3 +284,28 @@ def test_archive_batch_rejects_timestamps_outside_declared_period(tmp_path: Path
             store.save_archive_batch(url, [record], cursor="60001")
         assert store.archive_provenance_summary(url)["provenance_rows"] == 0
         assert store.dataset_summary() == []
+
+
+def test_archive_manifest_upsert_checksum_change_invalidates_provenance(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 1_704_067_200_000, "1704067200000", {"close": "1"})
+    with SQLiteStore(tmp_path / "upsert-checksum.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        store.save_archive_batch(url, [record], cursor="1704067200001")
+        store.update_archive_manifest(
+            url, status="imported", imported_at="2026-10-24T00:00:00Z",
+        )
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="b" * 64, size_bytes=101, row_count=1,
+        )
+        manifest = store.archive_manifest_summary()[0]
+        assert manifest["status"] == "verified"
+        assert manifest["imported_at"] is None
+        assert manifest["checksum_sha256"] == "b" * 64
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 0
