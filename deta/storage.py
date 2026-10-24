@@ -54,6 +54,19 @@ class SQLiteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_archive_manifest_dataset
               ON archive_manifest(exchange_id, market_type, data_type, symbol, archive_period);
+            CREATE TABLE IF NOT EXISTS archive_record_provenance (
+                archive_url TEXT NOT NULL,
+                exchange_id TEXT NOT NULL,
+                market_type TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                record_key TEXT NOT NULL,
+                timestamp_ms INTEGER NOT NULL,
+                payload_sha256 TEXT NOT NULL,
+                PRIMARY KEY (archive_url, record_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_provenance_dataset_time
+              ON archive_record_provenance(exchange_id, market_type, data_type, symbol, timestamp_ms);
             CREATE TABLE IF NOT EXISTS symbols (
                 exchange_id TEXT NOT NULL, market_type TEXT NOT NULL, symbol TEXT NOT NULL,
                 metadata_json TEXT NOT NULL, discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -146,6 +159,74 @@ class SQLiteStore:
                 (*identity, cursor, status, detail),
             )
             return inserted_rows
+
+    def save_archive_batch(
+        self, archive_url: str, records: list[DataRecord], *, cursor: str | None,
+        status: str = "partial", detail: str = "",
+    ) -> int:
+        """Atomically save archive records, per-archive provenance, and checkpoint state."""
+        if not records:
+            raise ValueError("Empty archive batches cannot be imported")
+        manifest = self._connection.execute(
+            """SELECT exchange_id, market_type, data_type, symbol, status
+               FROM archive_manifest WHERE archive_url=?""",
+            (archive_url,),
+        ).fetchone()
+        if manifest is None:
+            raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
+        exchange_id, market_type, data_type, symbol, manifest_status = manifest
+        if manifest_status != "verified":
+            raise ValueError("Archive must be verified before its records can be imported")
+        identity = (exchange_id, market_type, data_type, symbol)
+        if any((r.exchange_id, r.market_type, r.data_type, r.symbol) != identity for r in records):
+            raise ValueError("Archive records do not match the manifest dataset identity")
+        with self._connection:
+            before_records = self._connection.total_changes
+            self._connection.executemany(
+                """INSERT INTO records(exchange_id, market_type, data_type, symbol,
+                   timestamp_ms, record_key, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(exchange_id, market_type, data_type, symbol, record_key) DO NOTHING""",
+                [(r.exchange_id, r.market_type, r.data_type, r.symbol, r.timestamp_ms,
+                  r.record_key, json.dumps(r.payload, ensure_ascii=False, sort_keys=True))
+                 for r in records],
+            )
+            inserted_rows = self._connection.total_changes - before_records
+            self._connection.executemany(
+                """INSERT INTO archive_record_provenance(
+                       archive_url, exchange_id, market_type, data_type, symbol,
+                       record_key, timestamp_ms, payload_sha256)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(archive_url, record_key) DO UPDATE SET
+                       timestamp_ms=excluded.timestamp_ms, payload_sha256=excluded.payload_sha256""",
+                [(archive_url, *identity, r.record_key, r.timestamp_ms,
+                  __import__("hashlib").sha256(
+                      json.dumps(r.payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                  ).hexdigest()) for r in records],
+            )
+            self._connection.execute(
+                """INSERT INTO checkpoints(exchange_id, market_type, data_type, symbol,
+                   cursor, status, detail, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(exchange_id, market_type, data_type, symbol) DO UPDATE SET
+                   cursor=excluded.cursor, status=excluded.status, detail=excluded.detail,
+                   updated_at=CURRENT_TIMESTAMP""",
+                (*identity, cursor, status, detail),
+            )
+            return inserted_rows
+
+    def archive_provenance_summary(self, archive_url: str) -> dict[str, int]:
+        """Count provenance rows and rows whose corresponding stored record still exists."""
+        row = self._connection.execute(
+            """SELECT COUNT(*),
+                      SUM(CASE WHEN r.record_key IS NOT NULL THEN 1 ELSE 0 END)
+               FROM archive_record_provenance p
+               LEFT JOIN records r
+                 ON r.exchange_id=p.exchange_id AND r.market_type=p.market_type
+                AND r.data_type=p.data_type AND r.symbol=p.symbol
+                AND r.record_key=p.record_key
+               WHERE p.archive_url=?""",
+            (archive_url,),
+        ).fetchone()
+        return {"provenance_rows": int(row[0] or 0), "stored_record_rows": int(row[1] or 0)}
 
     def update_checkpoint(self, exchange_id: str, market_type: str, data_type: str,
                           symbol: str, cursor: str | None, status: str, detail: str = "") -> None:
