@@ -180,7 +180,7 @@ class SQLiteStore:
             raise KeyError(f"Archive URL is not registered in manifest: {archive_url}")
         (exchange_id, market_type, data_type, symbol, archive_period, manifest_status,
          checksum_sha256, size_bytes, manifest_row_count) = manifest
-        if manifest_status != "verified":
+        if manifest_status not in {"verified", "imported"}:
             raise ValueError("Archive must be verified before its records can be imported")
         if (
             not isinstance(checksum_sha256, str)
