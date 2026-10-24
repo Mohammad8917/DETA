@@ -135,8 +135,10 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
         store.update_archive_manifest(
             url, status="verified", checksum_sha256=first_digest, size_bytes=100,
         )
+        record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
+        store.save_archive_batch(url, [record], cursor="60001")
         store.update_archive_manifest(
-            url, status="imported", imported_at="2026-10-24T00:00:00Z", row_count=10,
+            url, status="imported", imported_at="2026-10-24T00:00:00Z", row_count=1,
         )
 
         # A rediscovery or re-verification of identical bytes must not erase import state.
@@ -154,6 +156,7 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
         assert row["status"] == "downloaded"
         assert row["checksum_sha256"] == second_digest
         assert row["imported_at"] is None
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 0
 
         with pytest.raises(ValueError, match="must be verified"):
             store.update_archive_manifest(url, status="imported", checksum_sha256="c" * 64)
