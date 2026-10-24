@@ -511,6 +511,33 @@ def test_reconcile_archive_klines_includes_daily_manifest_period_in_month_scope(
     assert report["manifest_entries_not_in_current_source_listing"] == []
 
 
+
+
+def test_reconcile_archive_klines_reports_unavailable_source_archive(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchive)
+    database = tmp_path / "unavailable-archive.sqlite3"
+    with SQLiteStore(database) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="unavailable",
+        )
+
+    result = cli.main([
+        "--db", str(database), "reconcile-archive-klines",
+        "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-month", "2024-01", "--end-month", "2024-01",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["non_importable_archives"] == [
+        {"archive_url": ARCHIVE_URL, "status": "unavailable"}
+    ]
+    assert report["imported_archives"] == []
+
+
 def test_reconcile_archive_klines_fails_when_import_timestamp_is_missing(
     tmp_path: Path, monkeypatch, capsys,
 ) -> None:
@@ -624,6 +651,7 @@ def test_live_smoke_workflow_uses_reconcile_cli_report_contract() -> None:
         "verified_but_not_imported",
         "failed_archives",
         "discovered_or_downloaded",
+        "non_importable_archives",
         "missing_checksum_or_size",
         "missing_import_timestamp",
         "imported_row_count_mismatches",
