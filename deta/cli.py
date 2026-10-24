@@ -1063,7 +1063,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps({
                     "exchange": "binance", "market": args.market,
                     "market_type": market_type, "symbol": args.symbol,
-                    "data_type": data_type,
+                    "interval": args.interval, "data_type": data_type,
                     "requested_months": {"start": args.start_month, "end": args.end_month},
                     "source_listed_archive_count": len(source_urls),
                     "manifest_entries_in_scope": len(scoped_manifest),
