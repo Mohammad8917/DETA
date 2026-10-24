@@ -106,6 +106,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--start-month", required=True, help="Inclusive YYYY-MM")
     reconcile.add_argument("--end-month", required=True, help="Inclusive YYYY-MM")
+    gap_audit = commands.add_parser(
+        "audit-kline-gaps",
+        help="Audit stored candle timestamp continuity in an explicit bounded UTC-millisecond range",
+    )
+    gap_audit.add_argument("--market-type", choices=("spot", "usd_m", "coin_m"), required=True)
+    gap_audit.add_argument("--symbol", required=True)
+    gap_audit.add_argument(
+        "--interval", choices=("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"), required=True,
+    )
+    gap_audit.add_argument("--start-ms", type=int, required=True, help="Inclusive UTC Unix timestamp in milliseconds; must align to interval")
+    gap_audit.add_argument("--end-ms", type=int, required=True, help="Inclusive UTC Unix timestamp in milliseconds; must align to interval")
     commands.add_parser("status", help="Show locally stored dataset coverage/status")
     return parser
 
@@ -715,6 +726,47 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "status":
             print(json.dumps(store.dataset_summary(), indent=2, ensure_ascii=False))
             return 0
+        if args.command == "audit-kline-gaps":
+            interval_ms = {
+                "1m": 60_000, "3m": 180_000, "5m": 300_000,
+                "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000,
+                "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000,
+                "8h": 28_800_000, "12h": 43_200_000, "1d": 86_400_000,
+                "3d": 259_200_000, "1w": 604_800_000,
+            }[args.interval]
+            if args.start_ms < 0 or args.end_ms < args.start_ms:
+                log.error("Invalid audit range: require 0 <= start-ms <= end-ms")
+                return 2
+            if args.start_ms % interval_ms or args.end_ms % interval_ms:
+                log.error("Range endpoints must align to UTC interval boundaries for this interval")
+                return 2
+            expected_count = ((args.end_ms - args.start_ms) // interval_ms) + 1
+            if expected_count > 2_000_000:
+                log.error("Refusing audit range above 2,000,000 expected candles; split it into smaller ranges")
+                return 2
+            data_type = f"klines_{args.interval}"
+            observed = store.record_timestamps(
+                exchange_id="binance", market_type=args.market_type,
+                data_type=data_type, symbol=args.symbol,
+                start_ms=args.start_ms, end_ms=args.end_ms,
+            )
+            observed_set = set(observed)
+            expected = range(args.start_ms, args.end_ms + 1, interval_ms)
+            missing = [timestamp for timestamp in expected if timestamp not in observed_set]
+            unexpected = [timestamp for timestamp in observed if (timestamp - args.start_ms) % interval_ms != 0]
+            print(json.dumps({
+                "exchange": "binance", "market_type": args.market_type,
+                "symbol": args.symbol, "data_type": data_type,
+                "requested_range_ms": {"start_inclusive": args.start_ms, "end_inclusive": args.end_ms},
+                "interval_ms": interval_ms, "expected_candles": expected_count,
+                "stored_distinct_timestamps": len(observed),
+                "missing_candle_count": len(missing), "first_missing_timestamps_ms": missing[:100],
+                "unexpected_off_grid_timestamps": unexpected[:100],
+                "first_stored_timestamp_ms": observed[0] if observed else None,
+                "last_stored_timestamp_ms": observed[-1] if observed else None,
+                "coverage_claim": "This checks timestamp continuity only within the explicit range and stored database. It does not prove source/archive completeness or validate candle payload contents.",
+            }, indent=2, ensure_ascii=False))
+            return 1 if missing or unexpected else 0
         if args.command == "archive-manifest":
             entries = store.archive_manifest_summary(
                 exchange_id="binance",
