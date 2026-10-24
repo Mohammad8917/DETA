@@ -402,3 +402,50 @@ def test_reconcile_archive_klines_compares_source_listing_with_manifest(
     assert report["missing_from_manifest"] == [feb_url]
     assert report["imported_archives"] == []
     assert "cannot prove" in report["coverage_claim"]
+
+
+
+def test_reconcile_archive_klines_reports_stale_manifest_entries_and_daily_fallback(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    daily_url = (
+        "https://data.binance.vision/data/spot/daily/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2024-02-01.zip"
+    )
+    stale_url = (
+        "https://data.binance.vision/data/spot/monthly/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    )
+
+    class DailyFallbackArchive(FakeArchive):
+        def list_monthly_archives(
+            self, symbol: str, interval: str, start_month: str | None = None,
+            end_month: str | None = None,
+        ) -> list[str]:
+            return []
+
+        def list_daily_archives(
+            self, dataset: str, symbol: str, interval: str | None = None,
+            start_month: str | None = None, end_month: str | None = None,
+        ) -> list[str]:
+            return [daily_url]
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", DailyFallbackArchive)
+    database = tmp_path / "data.sqlite3"
+    with SQLiteStore(database) as store:
+        store.upsert_archive_manifest(
+            archive_url=stale_url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="imported", checksum_sha256=hashlib.sha256(ARCHIVE_BYTES).hexdigest(),
+            size_bytes=len(ARCHIVE_BYTES), row_count=1, imported_at="2024-01-31T00:00:00+00:00",
+        )
+    result = cli.main([
+        "--db", str(database), "reconcile-archive-klines",
+        "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-month", "2024-01", "--end-month", "2024-02",
+    ])
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["source_listed_archive_count"] == 1
+    assert report["missing_from_manifest"] == [daily_url]
+    assert report["manifest_entries_not_in_current_source_listing"] == [stale_url]
