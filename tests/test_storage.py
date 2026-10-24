@@ -247,3 +247,20 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
         summary = store.archive_provenance_summary(url)
         assert summary["provenance_rows"] == 1
         assert summary["stored_record_rows"] == 0
+
+
+def test_archive_batch_rejects_verified_manifest_row_count_mismatch(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
+    with SQLiteStore(tmp_path / "row-count.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=2,
+        )
+        with pytest.raises(ValueError, match="does not match verified manifest row_count"):
+            store.save_archive_batch(url, [record], cursor="60001")
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 0
+        assert store.dataset_summary() == []
