@@ -425,6 +425,8 @@ def test_reconcile_archive_klines_compares_source_listing_with_manifest(
     assert result == 1
     report = json.loads(capsys.readouterr().out)
     assert report["source_listed_archive_count"] == 2
+    assert report["interval"] == "1m"
+    assert report["data_type"] == "klines_1m"
     assert report["verified_but_not_imported"] == [ARCHIVE_URL]
     assert report["missing_from_manifest"] == [feb_url]
     assert report["imported_archives"] == []
