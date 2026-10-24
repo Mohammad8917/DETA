@@ -133,7 +133,7 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
             data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
         )
         store.update_archive_manifest(
-            url, status="verified", checksum_sha256=first_digest, size_bytes=100,
+            url, status="verified", checksum_sha256=first_digest, size_bytes=100, row_count=1,
         )
         record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
         store.save_archive_batch(url, [record], cursor="60001")
