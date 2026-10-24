@@ -264,3 +264,20 @@ def test_archive_batch_rejects_verified_manifest_row_count_mismatch(tmp_path: Pa
             store.save_archive_batch(url, [record], cursor="60001")
         assert store.archive_provenance_summary(url)["provenance_rows"] == 0
         assert store.dataset_summary() == []
+
+
+def test_archive_batch_rejects_timestamps_outside_declared_period(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
+    with SQLiteStore(tmp_path / "period.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        with pytest.raises(ValueError, match="outside its declared UTC period"):
+            store.save_archive_batch(url, [record], cursor="60001")
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 0
+        assert store.dataset_summary() == []
