@@ -316,6 +316,23 @@ class SQLiteStore:
         ):
             raise ValueError("Archive checksum must be a 64-character SHA-256 hex digest")
         with self._connection:
+            existing = self._connection.execute(
+                "SELECT checksum_sha256, status FROM archive_manifest WHERE archive_url=?",
+                (archive_url,),
+            ).fetchone()
+            checksum_changed = (
+                existing is not None
+                and checksum_sha256 is not None
+                and existing[0] is not None
+                and checksum_sha256.lower() != str(existing[0]).lower()
+            )
+            if checksum_changed and status == "imported":
+                raise ValueError("A changed archive checksum must be verified before it can be marked imported")
+            if checksum_changed:
+                self._connection.execute(
+                    "DELETE FROM archive_record_provenance WHERE archive_url=?",
+                    (archive_url,),
+                )
             self._connection.execute(
                 """INSERT INTO archive_manifest(
                        archive_url, exchange_id, market_type, data_type, symbol, archive_period,
@@ -331,9 +348,18 @@ class SQLiteStore:
                        size_bytes=COALESCE(excluded.size_bytes, archive_manifest.size_bytes),
                        row_count=COALESCE(excluded.row_count, archive_manifest.row_count),
                        status=CASE
+                           WHEN excluded.checksum_sha256 IS NOT NULL
+                            AND archive_manifest.checksum_sha256 IS NOT NULL
+                            AND lower(excluded.checksum_sha256) != lower(archive_manifest.checksum_sha256)
+                           THEN excluded.status
                            WHEN archive_manifest.status='imported' AND excluded.status='discovered'
                            THEN archive_manifest.status ELSE excluded.status END,
-                       imported_at=COALESCE(excluded.imported_at, archive_manifest.imported_at),
+                       imported_at=CASE
+                           WHEN excluded.checksum_sha256 IS NOT NULL
+                            AND archive_manifest.checksum_sha256 IS NOT NULL
+                            AND lower(excluded.checksum_sha256) != lower(archive_manifest.checksum_sha256)
+                           THEN excluded.imported_at
+                           ELSE COALESCE(excluded.imported_at, archive_manifest.imported_at) END,
                        error=excluded.error,
                        updated_at=CURRENT_TIMESTAMP""",
                 (archive_url, exchange_id, market_type, data_type, symbol, archive_period,
