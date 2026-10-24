@@ -387,13 +387,19 @@ class SQLiteStore:
                     previous_market, previous_data_type, previous_symbol, previous_period,
                 ) = existing
                 previous_identity = (
-                    previous_exchange, previous_market, previous_data_type,
-                    previous_symbol, previous_period,
+                    previous_exchange, previous_market, previous_data_type, previous_symbol,
                 )
-                incoming_identity = (
-                    exchange_id, market_type, data_type, symbol, archive_period,
+                incoming_identity = (exchange_id, market_type, data_type, symbol)
+                legacy_daily_period_upgrade = (
+                    isinstance(previous_period, str)
+                    and re.fullmatch(r"\d{4}-\d{2}", previous_period) is not None
+                    and re.fullmatch(r"\d{4}-\d{2}-\d{2}", archive_period) is not None
+                    and archive_period.startswith(previous_period + "-")
                 )
-                if incoming_identity != previous_identity:
+                if (
+                    incoming_identity != previous_identity
+                    or (archive_period != previous_period and not legacy_daily_period_upgrade)
+                ):
                     raise ValueError(
                         "Archive URL identity is immutable; use the URL that matches its dataset and period"
                     )
