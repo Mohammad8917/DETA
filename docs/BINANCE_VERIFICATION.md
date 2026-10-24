@@ -65,6 +65,14 @@ The code contains initial implementations for:
 
 These implementations are not yet proven end-to-end against the live source across all relevant market/dataset combinations.
 
+## Bounded source-to-manifest reconciliation — unit-verified
+
+- The `reconcile-archive-klines` CLI compares the currently listed official monthly/daily kline archive URLs for one market, symbol, interval, and inclusive month range against persisted Manifest rows.
+- It separately reports source-listed URLs missing from the Manifest, rows marked verified but not imported, failed/discovered/imported entries, missing checksum/size metadata, and scoped Manifest URLs absent from the current source listing.
+- A deterministic mocked regression test covers a two-month range with one verified-but-not-imported archive and one source-listed archive missing from the Manifest.
+- Commit `39203844` fixes a parser/test-adapter coupling issue; CI run [40062644650](https://github.com/Mohammad8917/DETA/actions/runs/40062644650) passed.
+- **Evidence level: UNIT-VERIFIED only.** The workflow above was triggered by a push, not by the manual live smoke workflow. No live source-to-Manifest reconciliation has yet been recorded. This report compares archive URLs only; it does not validate stored candle timestamp continuity or prove that the source listing is exhaustive.
+
 ## Explicit blockers before Binance can be fully locked
 
 1. **Live archive-index verification:** run the current index-discovery and archive-listing code against the real official source. Unit fixtures currently model HTML anchor listings; this must not be mistaken for proof that the live listing endpoint exposes the same anchors. If the source listing format differs, correct discovery before relying on it.
