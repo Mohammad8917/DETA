@@ -351,6 +351,13 @@ class SQLiteStore:
             effective_imported_at = None if checksum_changed else (
                 imported_at if imported_at is not None else previous_imported_at
             )
+            if checksum_changed:
+                # Provenance belongs to the exact archive content version. Keeping it
+                # after a checksum change would make old rows look like new-import evidence.
+                self._connection.execute(
+                    "DELETE FROM archive_record_provenance WHERE archive_url=?",
+                    (archive_url,),
+                )
             effective_status = status
             if previous_status == "imported" and not checksum_changed and status in {
                 "discovered", "downloaded", "verified"
