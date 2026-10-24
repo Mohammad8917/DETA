@@ -205,3 +205,11 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - GitHub Actions run [40108532471](https://github.com/Mohammad8917/DETA/actions/runs/40108532471) for commit `91138cf794e93829ab33d88c40ca44cf8f68ee37` completed successfully: **99 tests passed**.
 - Two intermediate runs failed during this change: one had a test-fixture syntax error and another exposed an outdated call-order assertion. Both were corrected; only the final green run is counted as passing evidence.
 - This removes the specific risk of trusting a partial HTML listing. It does not prove the upstream S3 listing itself is exhaustive in every circumstance, nor does it prove live import success or two-year timestamp coverage. Those still require live source execution and data-level reconciliation.
+
+## Live-smoke reconciliation contract — CI verified (2026-10-24)
+
+- Commit `a2ccb1a7546e063c4a6962620ad0f737fd3ae444` adds a regression test checking that the live-smoke workflow consumes the reconciliation report fields emitted by `deta.cli`.
+- GitHub Actions run [40111787976](https://github.com/Mohammad8917/DETA/actions/runs/40111787976) completed successfully: **100 tests passed**.
+- The first version of the new test failed because one workflow field access is split across multiple YAML lines; the test was corrected to validate the field name independently of formatting. The failed run [40110255273](https://github.com/Mohammad8917/DETA/actions/runs/40110255273) is not counted as passing evidence.
+- This is workflow/report contract evidence only. The live-smoke workflow has still not been dispatched in this session, so it does not prove current Binance connectivity, archive import success, or two-year/all-symbol coverage.
+
