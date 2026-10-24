@@ -166,7 +166,16 @@ class BinanceArchiveAdapter:
 
             truncated = child_text(root, "IsTruncated")
             continuation = child_text(root, "NextContinuationToken")
-            if truncated != "true" or not continuation:
+            if truncated not in {"true", "false"}:
+                raise RuntimeError(
+                    f"S3 archive listing for prefix {prefix} has invalid IsTruncated={truncated!r}"
+                )
+            if truncated == "true" and not continuation:
+                raise RuntimeError(
+                    f"S3 archive listing for prefix {prefix} is truncated but has no "
+                    "NextContinuationToken; source inventory is incomplete"
+                )
+            if truncated == "false":
                 break
         return sorted(entries)
 
