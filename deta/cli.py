@@ -884,6 +884,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if url in by_url and by_url[url]["status"] == "imported"]
                 discovered_or_downloaded = [url for url in source_urls
                     if url in by_url and by_url[url]["status"] in {"discovered", "downloaded"}]
+                non_importable_archives = [
+                    {"archive_url": url, "status": by_url[url]["status"]}
+                    for url in source_urls
+                    if url in by_url and by_url[url]["status"] in {"missing", "unavailable"}
+                ]
                 missing_checksum = [url for url in source_urls
                     if url in by_url and (
                         not isinstance(by_url[url]["checksum_sha256"], str)
@@ -938,6 +943,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "failed_archives": failed,
                     "imported_archives": imported,
                     "discovered_or_downloaded": discovered_or_downloaded,
+                    "non_importable_archives": non_importable_archives,
                     "missing_checksum_or_size": missing_checksum,
                     "missing_import_timestamp": missing_import_timestamp,
                     "imported_row_count_mismatches": imported_row_count_mismatches,
@@ -955,6 +961,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     and not verified_not_imported
                     and not failed
                     and not discovered_or_downloaded
+                    and not non_importable_archives
                     and not missing_checksum
                     and not missing_import_timestamp
                     and not imported_row_count_mismatches
