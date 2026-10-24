@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import json
 import logging
 import re
@@ -200,6 +201,34 @@ def _validate_month_bounds(
             return "start-month must be less than or equal to end-month"
     return None
 
+
+
+def _kline_payload_issues(payload: object) -> list[str]:
+    """Return deterministic integrity failures for a stored OHLCV candle payload."""
+    if not isinstance(payload, dict):
+        return ["payload_is_not_an_object"]
+    values: dict[str, Decimal] = {}
+    for field in ("open", "high", "low", "close", "volume"):
+        raw = payload.get(field)
+        if raw is None:
+            return [f"missing_{field}"]
+        try:
+            value = Decimal(str(raw))
+        except (InvalidOperation, ValueError):
+            return [f"invalid_{field}"]
+        if not value.is_finite():
+            return [f"non_finite_{field}"]
+        values[field] = value
+    for field in ("open", "high", "low", "close"):
+        if values[field] <= 0:
+            return [f"non_positive_{field}"]
+    if values["volume"] < 0:
+        return ["negative_volume"]
+    if values["high"] < max(values["open"], values["low"], values["close"]):
+        return ["high_below_ohlc_value"]
+    if values["low"] > min(values["open"], values["high"], values["close"]):
+        return ["low_above_ohlc_value"]
+    return []
 
 def _backfill_archive_klines(
     store: SQLiteStore,
@@ -775,11 +804,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 log.error("Refusing audit range above 2,000,000 expected candles; split it into smaller ranges")
                 return 2
             data_type = f"klines_{args.interval}"
-            observed = store.record_timestamps(
+            payload_rows = store.record_payloads(
                 exchange_id="binance", market_type=args.market_type,
                 data_type=data_type, symbol=args.symbol,
                 start_ms=args.start_ms, end_ms=args.end_ms,
             )
+            observed = [int(row["timestamp_ms"]) for row in payload_rows]
             observed_set = set(observed)
             timestamp_counts: dict[int, int] = {}
             for timestamp in observed:
@@ -791,6 +821,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             missing = [timestamp for timestamp in expected if timestamp not in observed_set]
             unexpected = [timestamp for timestamp in observed_set
                           if (timestamp - args.start_ms) % interval_ms != 0]
+            invalid_payloads: list[dict[str, object]] = []
+            for row in payload_rows:
+                issues = _kline_payload_issues(row["payload"])
+                if issues:
+                    invalid_payloads.append({
+                        "timestamp_ms": row["timestamp_ms"],
+                        "record_key": row["record_key"],
+                        "issues": issues,
+                    })
             print(json.dumps({
                 "exchange": "binance", "market_type": args.market_type,
                 "symbol": args.symbol, "data_type": data_type,
@@ -804,11 +843,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "first_duplicate_timestamps_ms": duplicate_timestamps[:100],
                 "missing_candle_count": len(missing), "first_missing_timestamps_ms": missing[:100],
                 "unexpected_off_grid_timestamps": sorted(unexpected)[:100],
+                "invalid_candle_payload_count": len(invalid_payloads),
+                "first_invalid_candle_payloads": invalid_payloads[:100],
                 "first_stored_timestamp_ms": observed[0] if observed else None,
                 "last_stored_timestamp_ms": observed[-1] if observed else None,
-                "coverage_claim": "This checks timestamp continuity and duplicate timestamps within the explicit range and stored database. It does not prove source/archive completeness or validate candle payload contents.",
+                "coverage_claim": "This checks stored timestamp continuity, duplicate timestamps, and basic OHLCV payload integrity within the explicit range. It does not prove source/archive completeness, source inventory exhaustiveness, or that unavailable records were ever published.",
             }, indent=2, ensure_ascii=False))
-            return 1 if missing or unexpected or duplicate_timestamps else 0
+            return 1 if missing or unexpected or duplicate_timestamps or invalid_payloads else 0
         if args.command == "archive-manifest":
             entries = store.archive_manifest_summary(
                 exchange_id="binance",
