@@ -133,11 +133,19 @@ class BinanceArchiveAdapter:
             listing_url = f"{endpoint}?{urlencode(params)}"
             listing_response = self._get(listing_url, allow_not_found=True)
             if listing_response.status_code == 404:
-                return []
+                raise RuntimeError(
+                    f"Official S3 archive listing returned HTTP 404 for prefix {prefix}; "
+                    "source inventory cannot be verified"
+                )
             try:
                 root = ElementTree.fromstring(listing_response.content)
             except ElementTree.ParseError as exc:
                 raise RuntimeError(f"Invalid S3 archive listing XML for prefix {prefix}") from exc
+            if root.tag.rsplit("}", 1)[-1] != "ListBucketResult":
+                raise RuntimeError(
+                    f"Unexpected S3 archive listing response for prefix {prefix}: "
+                    f"{root.tag!r}; expected ListBucketResult"
+                )
 
             def child_text(element: ElementTree.Element, wanted: str) -> str | None:
                 for child in element.iter():
