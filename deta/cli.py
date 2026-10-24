@@ -858,7 +858,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "failed_archives": failed,
                     "imported_archives": imported,
                     "discovered_or_downloaded": discovered_or_downloaded,
-                    "missing_checksum_or_size_or_invalid_integrity_metadata": missing_checksum,
+                    "missing_checksum_or_size": missing_checksum,
                     "missing_import_timestamp": missing_import_timestamp,
                     "manifest_entries_not_in_current_source_listing": manifest_not_listed,
                     "coverage_claim": (
