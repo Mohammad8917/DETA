@@ -135,8 +135,8 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
         store.update_archive_manifest(
             url, status="verified", checksum_sha256=first_digest, size_bytes=100, row_count=1,
         )
-        record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"})
-        store.save_archive_batch(url, [record], cursor="60001")
+        record = DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 1_704_067_200_000, "1704067200000", {"close": "1"})
+        store.save_archive_batch(url, [record], cursor="1704067200001")
         store.update_archive_manifest(
             url, status="imported", imported_at="2026-10-24T00:00:00Z", row_count=1,
         )
@@ -216,12 +216,12 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
     with SQLiteStore(path) as store:
         store.upsert_archive_manifest(
             archive_url=url, exchange_id="binance", market_type="spot",
-            data_type="klines_1m", symbol="BTCUSDT", archive_period="1970-01",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
         )
         store.update_archive_manifest(
             url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
         )
-        assert store.save_archive_batch(url, [record], cursor="60001") == 1
+        assert store.save_archive_batch(url, [record], cursor="1704067200001") == 1
         assert store.archive_provenance_summary(url) == {
             "provenance_rows": 1, "stored_record_rows": 1,
             "timestamp_mismatches": 0, "payload_hash_mismatches": 0,
@@ -229,13 +229,13 @@ def test_archive_provenance_detects_missing_records_and_payload_mutation(tmp_pat
         store._connection.execute(
             """UPDATE records SET payload_json=?
                WHERE exchange_id='binance' AND market_type='spot'
-                 AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='60000'""",
+                 AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='1704067200000'""",
             ('{"close":"2"}',),
         )
         store._connection.commit()
         assert store.archive_provenance_summary(url)["payload_hash_mismatches"] == 1
         store._connection.execute(
-            """UPDATE records SET payload_json=?, timestamp_ms=120000
+            """UPDATE records SET payload_json=?, timestamp_ms=1704067260000
                WHERE exchange_id='binance' AND market_type='spot'
                  AND data_type='klines_1m' AND symbol='BTCUSDT' AND record_key='60000'""",
             ('{"close":"1"}',),
