@@ -146,6 +146,9 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
         row = store.archive_manifest_summary()[0]
         assert row["status"] == "imported"
         assert row["imported_at"] == "2026-10-24T00:00:00Z"
+        # Re-importing the same verified bytes is idempotent and keeps provenance valid.
+        assert store.save_archive_batch(url, [record], cursor="1704067200001") == 0
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 1
 
         # A different checksum represents different content; the old import timestamp
         # must be invalidated and the new content must pass verification/import again.
