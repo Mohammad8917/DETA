@@ -222,13 +222,13 @@ def _backfill_archive_klines(
                             status="discovered",
                         )
                         records = archive.fetch_kline_archive(url)
-                        archives_verified += 1
                         digest = archive.last_verified_checksum_sha256
                         size_bytes = archive.last_verified_size_bytes
                         if digest is None or size_bytes is None:
                             raise RuntimeError(
                                 f"Archive parser returned without verified checksum metadata: {url}"
                             )
+                        archives_verified += 1
                         store.update_archive_manifest(
                             url, status="verified", checksum_sha256=digest,
                             size_bytes=size_bytes, row_count=len(records), error="",
