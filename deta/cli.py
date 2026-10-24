@@ -769,9 +769,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                 symbol=args.symbol,
             )
             counts: dict[str, int] = {}
+            imported_audit_failures: list[dict[str, object]] = []
             for entry in entries:
                 status = str(entry["status"])
                 counts[status] = counts.get(status, 0) + 1
+                provenance = store.archive_provenance_summary(str(entry["archive_url"]))
+                row_count = entry["row_count"]
+                audit_passed: bool | None = None
+                if status == "imported":
+                    audit_passed = (
+                        isinstance(row_count, int)
+                        and row_count > 0
+                        and provenance["provenance_rows"] == row_count
+                        and provenance["stored_record_rows"] == row_count
+                        and provenance["timestamp_mismatches"] == 0
+                        and provenance["payload_hash_mismatches"] == 0
+                    )
+                    if not audit_passed:
+                        imported_audit_failures.append({
+                            "archive_url": entry["archive_url"],
+                            "manifest_row_count": row_count,
+                            **provenance,
+                        })
+                entry["provenance_audit"] = {
+                    **provenance,
+                    "manifest_row_count": row_count,
+                    "passed": audit_passed,
+                }
             print(json.dumps({
                 "exchange": "binance",
                 "filters": {
@@ -781,10 +805,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 },
                 "archive_count": len(entries),
                 "status_counts": counts,
+                "imported_provenance_audit_failures": imported_audit_failures,
+                "audit_passed": not imported_audit_failures,
                 "archives": entries,
-                "coverage_claim": "Manifest state is audit evidence, not proof of exhaustive source coverage.",
+                "coverage_claim": "Manifest and provenance audit do not by themselves prove exhaustive source coverage.",
             }, indent=2, ensure_ascii=False))
-            return 0
+            return 1 if imported_audit_failures else 0
         if args.command == "reconcile-archive-klines":
             archive = BinanceArchiveAdapter(args.market)
             try:
