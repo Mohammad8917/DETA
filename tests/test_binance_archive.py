@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import io
 import zipfile
+import re
+from urllib.parse import parse_qs, urlsplit
+from xml.sax.saxutils import escape
 
 import httpx
 import pytest
@@ -17,8 +20,41 @@ class MockClient:
 
     def get(self, url: str) -> httpx.Response:
         self.calls.append(url)
-        payload = self.responses[url]
         request = httpx.Request("GET", url)
+        payload = self.responses.get(url)
+        if payload is None and "s3-ap-northeast-1.amazonaws.com/data.binance.vision" in url:
+            query = parse_qs(urlsplit(url).query)
+            prefix = query["prefix"][0]
+            directory = "https://data.binance.vision/" + prefix
+            html = self.responses.get(directory, "")
+            if isinstance(html, bytes):
+                html = html.decode("utf-8", errors="replace")
+            children: set[str] = set()
+            for href in re.findall(r'<a\\s+href=["\\']([^"\\']+)["\\']', str(html), re.I):
+                if href in {"../", "./", "/"}:
+                    continue
+                name = href.split("?", 1)[0].split("#", 1)[0]
+                if name.startswith(("http://", "https://")):
+                    name = urlsplit(name).path.rsplit("/", 1)[-1]
+                name = name.lstrip("/")
+                if not name:
+                    continue
+                if "/" in name:
+                    children.add(name.split("/", 1)[0] + "/")
+                else:
+                    children.add(name)
+            rows = []
+            for child in sorted(children):
+                if child.endswith("/"):
+                    rows.append(f"<CommonPrefixes><Prefix>{escape(prefix + child)}</Prefix></CommonPrefixes>")
+                else:
+                    rows.append(f"<Contents><Key>{escape(prefix + child)}</Key></Contents>")
+            payload = (
+                '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                '<IsTruncated>false</IsTruncated>' + "".join(rows) + '</ListBucketResult>'
+            )
+        if payload is None:
+            raise KeyError(url)
         if isinstance(payload, str):
             return httpx.Response(200, text=payload, request=request)
         return httpx.Response(200, content=payload, request=request)
@@ -450,4 +486,48 @@ def test_verified_archive_exposes_exact_checksum_and_byte_size() -> None:
     assert len(adapter.fetch_kline_archive(url)) == 1
     assert adapter.last_verified_checksum_sha256 == hashlib.sha256(payload).hexdigest()
     assert adapter.last_verified_size_bytes == len(payload)
+    adapter.close()
+
+
+
+def test_partial_html_inventory_is_ignored_in_favor_of_authoritative_s3_listing() -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/"
+    s3_listing = (
+        "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        "?list-type=2&prefix=data%2Fspot%2Fmonthly%2Fklines%2FBTCUSDT%2F1m%2F&delimiter=%2F"
+    )
+    html = (
+        '<a href="BTCUSDT-1m-2024-01.zip">jan</a>'
+        '<a href="BTCUSDT-1m-2024-02.zip">feb</a>'
+    )
+    xml = """<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+      <IsTruncated>false</IsTruncated>
+      <Contents><Key>data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip</Key></Contents>
+    </ListBucketResult>"""
+    client = MockClient({directory: html, s3_listing: xml})
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    assert adapter.list_monthly_archives(
+        "BTCUSDT", "1m", start_month="2024-01", end_month="2024-02"
+    ) == [directory + "BTCUSDT-1m-2024-01.zip"]
+    assert client.calls == [directory, s3_listing]
+    adapter.close()
+
+
+def test_s3_listing_rejects_repeated_continuation_token() -> None:
+    directory = "https://data.binance.vision/data/spot/monthly/klines/"
+    base = (
+        "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+        "?list-type=2&prefix=data%2Fspot%2Fmonthly%2Fklines%2F&delimiter=%2F"
+    )
+    second = base + "&continuation-token=repeat-token"
+    xml = """<ListBucketResult><IsTruncated>true</IsTruncated>
+      <NextContinuationToken>repeat-token</NextContinuationToken></ListBucketResult>"""
+    client = MockClient({
+        directory: "<html>partial</html>",
+        base: xml,
+        second: xml,
+    })
+    adapter = BinanceArchiveAdapter("spot", client=client, request_pause=0)
+    with pytest.raises(RuntimeError, match="repeated a continuation token"):
+        adapter.list_archive_symbols("klines")
     adapter.close()
