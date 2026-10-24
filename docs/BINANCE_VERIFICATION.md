@@ -222,3 +222,12 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - The first version of the new test failed because one workflow field access is split across multiple YAML lines; the test was corrected to validate the field name independently of formatting. The failed run [40110255273](https://github.com/Mohammad8917/DETA/actions/runs/40110255273) is not counted as passing evidence.
 - This is workflow/report contract evidence only. The live-smoke workflow has still not been dispatched in this session, so it does not prove current Binance connectivity, archive import success, or two-year/all-symbol coverage.
 
+
+
+## Batch kline source-to-manifest reconciliation — unit-verified (2026-10-24)
+
+- Added `reconcile-archive-klines-batch` to reconcile more than one symbol/interval in a single invocation. When symbols are omitted, it unions symbols discovered from the official monthly and daily kline archive indexes; explicit symbols can be supplied to bound a run.
+- The command records an individual result for every requested symbol/interval pair, reports pass/fail totals and failed pairs, and exits nonzero if any pair fails. Invalid month bounds are rejected before source discovery.
+- Regression tests cover discovery across both indexes, all symbol/interval combinations being attempted, aggregation of a mixed pass/fail batch, and fail-closed invalid-month handling.
+- GitHub Actions run [40116008045](https://github.com/Mohammad8917/DETA/actions/runs/40116008045) completed successfully: **114 tests passed** for commit `b50158186e3945bf18486121b363f602523122cf`.
+- This is a batch orchestration capability and unit-test evidence only. The batch command has not been run against the live source across the complete intended two-year scope in this evidence snapshot. Source listing, Manifest reconciliation, stored timestamp-gap audits, and OHLCV payload audits remain separate checks; no full-coverage claim is made.
