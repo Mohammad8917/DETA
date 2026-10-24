@@ -211,36 +211,31 @@ class SQLiteStore:
         if any(not start_ms <= record.timestamp_ms < end_ms for record in records):
             raise ValueError("Archive contains records outside its declared UTC period")
         with self._connection:
-            before_records = self._connection.total_changes
+            record_keys = [record.record_key for record in records]
+            existing_keys: set[str] = set()
+            for offset in range(0, len(record_keys), 500):
+                chunk = record_keys[offset:offset + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                found = self._connection.execute(
+                    f"""SELECT record_key FROM records
+                        WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
+                          AND record_key IN ({placeholders})""",
+                    (*identity, *chunk),
+                ).fetchall()
+                existing_keys.update(str(row[0]) for row in found)
+            inserted_rows = len(record_keys) - len(existing_keys)
             self._connection.executemany(
                 """INSERT INTO records(exchange_id, market_type, data_type, symbol,
                    timestamp_ms, record_key, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(exchange_id, market_type, data_type, symbol, record_key)
                    DO UPDATE SET timestamp_ms=excluded.timestamp_ms,
-                                 payload_json=excluded.payload_json""",
+                                 payload_json=excluded.payload_json
+                   WHERE records.timestamp_ms IS NOT excluded.timestamp_ms
+                      OR records.payload_json IS NOT excluded.payload_json""",
                 [(r.exchange_id, r.market_type, r.data_type, r.symbol, r.timestamp_ms,
                   r.record_key, json.dumps(r.payload, ensure_ascii=False, sort_keys=True))
                  for r in records],
             )
-            inserted_rows = self._connection.total_changes - before_records
-            # INSERT OR IGNORE is safe only when a pre-existing record is byte-for-byte
-            # equivalent to the archive record. Otherwise the archive must not be marked
-            # imported while the database silently retains conflicting content.
-            for record in records:
-                stored = self._connection.execute(
-                    """SELECT timestamp_ms, payload_json FROM records
-                       WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
-                         AND record_key=?""",
-                    (*identity, record.record_key),
-                ).fetchone()
-                expected_payload = json.dumps(
-                    record.payload, ensure_ascii=False, sort_keys=True
-                )
-                if stored is None or stored[0] != record.timestamp_ms or stored[1] != expected_payload:
-                    raise RuntimeError(
-                        "Archive record conflicts with an existing stored record: "
-                        f"{record.record_key}"
-                    )
             self._connection.executemany(
                 """INSERT INTO archive_record_provenance(
                        archive_url, exchange_id, market_type, data_type, symbol,
