@@ -103,22 +103,17 @@ class BinanceArchiveAdapter:
         raise RuntimeError(f"Binance archive request failed for {url}: {last_error}") from last_error
 
     def _list_directory_hrefs(self, directory: str) -> list[str]:
-        """List entries from HTML when available, falling back to S3 ListObjectsV2.
+        """Return the complete paginated S3 inventory; HTML is never trusted as exhaustive.
 
-        The public file-browser can render entries through JavaScript and expose no
-        archive links to an HTML parser. The S3 listing API is the fallback source.
+        The public HTML browser is useful for humans but has no completeness contract:
+        a partial page can contain valid links. Therefore S3 ListObjectsV2 is the
+        authoritative inventory even when the HTML page contains some entries.
+        A failed or malformed S3 listing fails closed rather than silently falling
+        back to a potentially incomplete HTML result.
         """
-        response = self._get(directory, allow_not_found=True)
-        if response.status_code != 404:
-            parser = _Links()
-            parser.feed(response.text)
-            useful = [
-                href for href in parser.hrefs
-                if href not in {"../", "./", "/"}
-                and (href.endswith("/") or ".zip" in href.lower())
-            ]
-            if useful:
-                return useful
+        # Fetch HTML only as a best-effort availability check; its links are not used
+        # as inventory evidence because the page does not guarantee completeness.
+        self._get(directory, allow_not_found=True)
 
         prefix = urlsplit(directory).path.lstrip("/")
         if not prefix.endswith("/"):
@@ -126,6 +121,7 @@ class BinanceArchiveAdapter:
         endpoint = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
         entries: set[str] = set()
         continuation: str | None = None
+        seen_tokens: set[str] = set()
         while True:
             params = {"list-type": "2", "prefix": prefix, "delimiter": "/"}
             if continuation:
@@ -148,34 +144,51 @@ class BinanceArchiveAdapter:
                 )
 
             def child_text(element: ElementTree.Element, wanted: str) -> str | None:
-                for child in element.iter():
+                for child in element:
                     if child.tag.rsplit("}", 1)[-1] == wanted:
                         return child.text
                 return None
 
-            for element in root.iter():
+            for element in root:
                 tag = element.tag.rsplit("}", 1)[-1]
                 if tag == "Contents":
                     key = child_text(element, "Key")
                     if key and key.startswith(prefix):
-                        entries.add(key[len(prefix):])
+                        relative = key[len(prefix):]
+                        if relative and "/" not in relative:
+                            entries.add(relative)
                 elif tag == "CommonPrefixes":
                     child_prefix = child_text(element, "Prefix")
                     if child_prefix and child_prefix.startswith(prefix):
-                        entries.add(child_prefix[len(prefix):])
+                        relative = child_prefix[len(prefix):]
+                        if relative and relative.endswith("/") and "/" not in relative[:-1]:
+                            entries.add(relative)
 
             truncated = child_text(root, "IsTruncated")
-            continuation = child_text(root, "NextContinuationToken")
+            next_token = child_text(root, "NextContinuationToken")
             if truncated not in {"true", "false"}:
                 raise RuntimeError(
                     f"S3 archive listing for prefix {prefix} has invalid IsTruncated={truncated!r}"
                 )
-            if truncated == "true" and not continuation:
-                raise RuntimeError(
-                    f"S3 archive listing for prefix {prefix} is truncated but has no "
-                    "NextContinuationToken; source inventory is incomplete"
-                )
-            if truncated == "false":
+            if truncated == "true":
+                if not next_token:
+                    raise RuntimeError(
+                        f"S3 archive listing for prefix {prefix} is truncated but has no "
+                        "NextContinuationToken; source inventory is incomplete"
+                    )
+                if next_token in seen_tokens:
+                    raise RuntimeError(
+                        f"S3 archive listing for prefix {prefix} repeated a continuation token; "
+                        "source inventory cannot be verified"
+                    )
+                seen_tokens.add(next_token)
+                continuation = next_token
+            else:
+                if next_token:
+                    raise RuntimeError(
+                        f"S3 archive listing for prefix {prefix} is marked complete but "
+                        "unexpectedly contains NextContinuationToken"
+                    )
                 break
         return sorted(entries)
 
