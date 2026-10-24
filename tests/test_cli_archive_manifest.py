@@ -611,6 +611,27 @@ def test_audit_kline_gaps_detects_duplicate_timestamps(
     assert report["missing_candle_count"] == 0
 
 
+def test_audit_kline_gaps_detects_off_grid_timestamp(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "off-grid-timestamp.sqlite3"
+    with SQLiteStore(database) as store:
+        store.save_batch([
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 0, "row-a", {"close": "1"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 30_000, "row-off-grid", {"close": "1.5"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "row-b", {"close": "2"}),
+        ], cursor="60001")
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "60000",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_candle_count"] == 0
+    assert report["unexpected_off_grid_timestamps"] == [30_000]
+
+
 def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, caplog) -> None:
     result = cli.main([
         "--db", str(tmp_path / "data.sqlite3"), "audit-kline-gaps",
