@@ -356,3 +356,37 @@ def test_archive_import_rejects_duplicate_record_keys_before_writing(tmp_path: P
         assert store.archive_provenance_summary(url)["provenance_rows"] == 0
         assert store.archive_manifest_summary()[0]["status"] == "verified"
         assert store.dataset_summary() == []
+
+
+def test_archive_import_rolls_back_when_existing_record_conflicts(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    existing = DataRecord(
+        "binance", "spot", "klines_1m", "BTCUSDT",
+        1_704_067_200_000, "1704067200000", {"close": "0.9"},
+    )
+    archived = DataRecord(
+        "binance", "spot", "klines_1m", "BTCUSDT",
+        1_704_067_200_000, "1704067200000", {"close": "1.0"},
+    )
+    with SQLiteStore(tmp_path / "conflicting-record.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        store.save_batch([existing], cursor="1704067200001")
+        with pytest.raises(RuntimeError, match="conflicts with an existing stored record"):
+            store.save_archive_batch(url, [archived], cursor="1704067200001")
+        manifest = next(item for item in store.archive_manifest_summary() if item["archive_url"] == url)
+        assert manifest["status"] == "verified"
+        assert manifest["imported_at"] is None
+        assert store.archive_provenance_summary(url)["provenance_rows"] == 0
+        stored = store._connection.execute(
+            """SELECT payload_json FROM records
+               WHERE exchange_id='binance' AND market_type='spot'
+                 AND data_type='klines_1m' AND symbol='BTCUSDT'
+                 AND record_key='1704067200000'"""
+        ).fetchone()
+        assert stored[0] == '{"close": "0.9"}'
