@@ -205,3 +205,56 @@ def test_reconciliation_fails_when_imported_manifest_lacks_checksum_or_size(
     assert report["missing_checksum_or_size"] == [ARCHIVE_URL]
     assert exit_code == 1
 
+
+def test_reconciliation_fails_when_imported_archive_has_no_import_timestamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "missing-import-time.sqlite3"
+    with SQLiteStore(db_path) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL,
+            exchange_id="binance",
+            market_type="spot",
+            data_type="klines_1m",
+            symbol="BTCUSDT",
+            archive_period="2024-01",
+            status="imported",
+            checksum_sha256="d" * 64,
+            size_bytes=1234,
+            row_count=10,
+        )
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    exit_code = cli.main(_args(db_path))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_import_timestamp"] == [ARCHIVE_URL]
+    assert exit_code == 1
+
+
+def test_reconciliation_rejects_zero_byte_archive_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "zero-size.sqlite3"
+    with SQLiteStore(db_path) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL,
+            exchange_id="binance",
+            market_type="spot",
+            data_type="klines_1m",
+            symbol="BTCUSDT",
+            archive_period="2024-01",
+            status="imported",
+            checksum_sha256="e" * 64,
+            size_bytes=0,
+            row_count=10,
+            imported_at="2026-10-24T00:00:00+00:00",
+        )
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    exit_code = cli.main(_args(db_path))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_checksum_or_size"] == [ARCHIVE_URL]
+    assert exit_code == 1
+
