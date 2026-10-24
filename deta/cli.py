@@ -162,12 +162,21 @@ def _monotonic_cursor(
     return str(candidate)
 
 
-def _archive_month(url: str) -> str:
+def _archive_period(url: str) -> str:
+    """Return the exact UTC month or day encoded in an official archive filename."""
     name = url.rstrip("/").rsplit("/", 1)[-1]
-    match = re.search(r"-(\d{4}-\d{2})(?:-\d{2})?\.zip$", name)
+    match = re.search(r"-(\d{4}-\d{2}(?:-\d{2})?)\.zip$", name)
     if match is None:
-        raise ValueError(f"Cannot determine archive month from filename: {name}")
-    return match.group(1)
+        raise ValueError(f"Cannot determine archive period from filename: {name}")
+    period = match.group(1)
+    # Reject impossible calendar dates instead of persisting misleading provenance.
+    datetime.strptime(period, "%Y-%m-%d" if len(period) == 10 else "%Y-%m")
+    return period
+
+
+def _archive_month(url: str) -> str:
+    """Return the YYYY-MM grouping key for either monthly or daily archives."""
+    return _archive_period(url)[:7]
 
 
 def _backfill_archive_klines(
@@ -241,7 +250,7 @@ def _backfill_archive_klines(
                         current_archive_url = url
                         store.upsert_archive_manifest(
                             archive_url=url, exchange_id=exchange_id, market_type=market_type,
-                            data_type=data_type, symbol=symbol, archive_period=_archive_month(url),
+                            data_type=data_type, symbol=symbol, archive_period=_archive_period(url),
                             status="discovered",
                         )
                         records = archive.fetch_kline_archive(url)
@@ -361,7 +370,7 @@ def _backfill_archive_funding_rates(
                     current_archive_url = url
                     store.upsert_archive_manifest(
                         archive_url=url, exchange_id="binance", market_type=source.market_type,
-                        data_type=data_type, symbol=symbol, archive_period=_archive_month(url),
+                        data_type=data_type, symbol=symbol, archive_period=_archive_period(url),
                         status="discovered",
                     )
                     records = archive.fetch_funding_rate_archive(url)
