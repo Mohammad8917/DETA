@@ -517,11 +517,11 @@ def test_audit_kline_gaps_reports_missing_timestamp_in_bounded_range(
     assert "does not prove source/archive completeness" in report["coverage_claim"]
 
 
-def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, capsys) -> None:
+def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, caplog) -> None:
     result = cli.main([
         "--db", str(tmp_path / "data.sqlite3"), "audit-kline-gaps",
         "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
         "--start-ms", "1", "--end-ms", "120000",
     ])
     assert result == 2
-    assert "align" in capsys.readouterr().err
+    assert "align" in caplog.text
