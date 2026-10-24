@@ -367,3 +367,71 @@ def test_archive_manifest_command_fails_when_imported_provenance_is_missing(
     assert report["audit_passed"] is False
     assert report["imported_provenance_audit_failures"][0]["stored_record_rows"] == 0
     assert exit_code == 1
+
+
+
+def test_batch_reconciliation_checks_every_discovered_symbol_interval_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class FakeBatchArchiveAdapter:
+        market_type = "spot"
+
+        def __init__(self, market: str) -> None:
+            assert market == "spot"
+
+        def list_archive_symbols(self, dataset: str, frequency: str) -> list[str]:
+            assert dataset == "klines"
+            return ["BTCUSDT"] if frequency == "monthly" else ["ETHUSDT"]
+
+        def list_monthly_archives(
+            self, symbol: str, interval: str, start_month: str, end_month: str
+        ) -> list[str]:
+            if symbol == "BTCUSDT" and interval == "1m":
+                return [ARCHIVE_URL]
+            return []
+
+        def list_daily_archives(
+            self, dataset: str, symbol: str, interval: str, start_month: str, end_month: str
+        ) -> list[str]:
+            return []
+
+        def close(self) -> None:
+            pass
+
+    db_path = tmp_path / "batch.sqlite3"
+    _register_imported_archive(db_path)
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeBatchArchiveAdapter)
+
+    exit_code = cli.main([
+        "--db", str(db_path),
+        "reconcile-archive-klines-batch",
+        "--market", "spot",
+        "--intervals", "1m", "5m",
+        "--start-month", "2024-01",
+        "--end-month", "2024-01",
+    ])
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert report["datasets_checked"] == 4
+    assert report["datasets_passed"] == 1
+    assert {(item["symbol"], item["interval"]) for item in report["datasets_failed"]} == {
+        ("BTCUSDT", "5m"), ("ETHUSDT", "1m"), ("ETHUSDT", "5m")
+    }
+    assert exit_code == 1
+
+
+def test_batch_reconciliation_rejects_invalid_month_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden_adapter(market: str) -> object:
+        raise AssertionError("source adapter must not be constructed for invalid month bounds")
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", forbidden_adapter)
+    exit_code = cli.main([
+        "--db", str(tmp_path / "invalid-batch.sqlite3"),
+        "reconcile-archive-klines-batch",
+        "--market", "spot", "--intervals", "1m",
+        "--start-month", "2024-13", "--end-month", "2025-01",
+    ])
+    assert exit_code == 2
