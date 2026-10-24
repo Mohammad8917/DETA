@@ -300,7 +300,7 @@ def test_archive_manifest_cli_reports_status_counts(
     assert "not proof" in report["coverage_claim"]
 
 def test_empty_verified_archive_is_not_marked_imported(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, capsys,
 ) -> None:
     monkeypatch.setattr(cli, "BinanceSpotAdapter", FakeSource)
 
@@ -316,6 +316,9 @@ def test_empty_verified_archive_is_not_marked_imported(
             store, "spot", ["BTCUSDT"], ["1m"], "2024-01", "2024-01"
         )
         assert result == 0
+        run_report = json.loads(capsys.readouterr().out)
+        assert run_report["archives_verified"] == 1
+        assert run_report["archives_imported"] == 0
         manifest = store.archive_manifest_summary(
             exchange_id="binance", market_type="spot", data_type="klines_1m",
             symbol="BTCUSDT",
