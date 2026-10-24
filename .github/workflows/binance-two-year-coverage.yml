@@ -1,0 +1,269 @@
+name: Binance two-year bounded coverage proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: "Binance market family"
+        required: true
+        type: choice
+        options:
+          - spot
+          - usd-m
+          - coin-m
+      symbol:
+        description: "One symbol/contract to prove (for example BTCUSDT)"
+        required: true
+        default: BTCUSDT
+        type: string
+      interval:
+        description: "Candle interval for the complete two-year window"
+        required: true
+        type: choice
+        default: 15m
+        options:
+          - 1m
+          - 5m
+          - 15m
+          - 1h
+          - 4h
+          - 1d
+      start_month:
+        description: "First month, inclusive; the range must cover exactly 24 calendar months"
+        required: true
+        default: "2024-01"
+        type: string
+      end_month:
+        description: "Last month, inclusive; the range must cover exactly 24 calendar months"
+        required: true
+        default: "2025-12"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  two-year-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Validate exact two-year scope and calculate UTC candle bounds
+        id: bounds
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+          INTERVAL: ${{ inputs.interval }}
+          START_MONTH: ${{ inputs.start_month }}
+          END_MONTH: ${{ inputs.end_month }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import calendar
+          import os
+          import re
+          from datetime import datetime, timezone
+
+          market = os.environ["MARKET"]
+          symbol = os.environ["SYMBOL"]
+          interval = os.environ["INTERVAL"]
+          start_text = os.environ["START_MONTH"]
+          end_text = os.environ["END_MONTH"]
+
+          if not re.fullmatch(r"[A-Za-z0-9_]{2,30}", symbol):
+              raise SystemExit("Invalid symbol/contract format")
+          def parse_month(value: str) -> datetime:
+              if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", value):
+                  raise SystemExit(f"Invalid YYYY-MM month: {value!r}")
+              return datetime.strptime(value, "%Y-%m").replace(tzinfo=timezone.utc)
+
+          start = parse_month(start_text)
+          end = parse_month(end_text)
+          month_distance = (end.year - start.year) * 12 + end.month - start.month
+          if month_distance != 23:
+              raise SystemExit("The inclusive range must contain exactly 24 calendar months")
+          interval_ms = {
+              "1m": 60_000,
+              "5m": 300_000,
+              "15m": 900_000,
+              "1h": 3_600_000,
+              "4h": 14_400_000,
+              "1d": 86_400_000,
+          }[interval]
+          next_month_year = end.year + (1 if end.month == 12 else 0)
+          next_month_number = 1 if end.month == 12 else end.month + 1
+          next_month = datetime(next_month_year, next_month_number, 1, tzinfo=timezone.utc)
+          start_ms = int(start.timestamp() * 1000)
+          end_ms = int(next_month.timestamp() * 1000) - interval_ms
+          expected = ((end_ms - start_ms) // interval_ms) + 1
+          if expected <= 0 or expected > 2_000_000:
+              raise SystemExit(f"Refusing invalid/oversized audit range: {expected} candles")
+          market_type = {"spot": "spot", "usd-m": "usd_m", "coin-m": "coin_m"}[market]
+          print(f"start_ms={start_ms}")
+          print(f"end_ms={end_ms}")
+          print(f"expected_candles={expected}")
+          print(f"market_type={market_type}")
+          print(f"interval_ms={interval_ms}")
+          print(f"scope_label={market}/{symbol}/{interval}/{start_text}..{end_text}")
+          PY
+          mkdir -p artifacts
+          printf 'market=%s\nsymbol=%s\ninterval=%s\nstart_month=%s\nend_month=%s\nexpected_candles=%s\n' \
+            "$MARKET" "$SYMBOL" "$INTERVAL" "$START_MONTH" "$END_MONTH" \
+            "$(grep '^expected_candles=' "$GITHUB_OUTPUT" | cut -d= -f2)" \
+            | tee artifacts/request.txt
+
+      - name: Import official monthly/daily archives for the full two-year scope
+        id: import
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+          INTERVAL: ${{ inputs.interval }}
+          START_MONTH: ${{ inputs.start_month }}
+          END_MONTH: ${{ inputs.end_month }}
+        run: |
+          set -euo pipefail
+          python -m deta.cli --db artifacts/two-year.sqlite3 backfill-archive-klines \
+            --market "$MARKET" --symbols "$SYMBOL" --intervals "$INTERVAL" \
+            --start-month "$START_MONTH" --end-month "$END_MONTH" \
+            2>&1 | tee artifacts/import.log
+
+      - name: Reconcile official source inventory against the persisted manifest
+        if: always() && steps.import.outcome == 'success'
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+          INTERVAL: ${{ inputs.interval }}
+          START_MONTH: ${{ inputs.start_month }}
+          END_MONTH: ${{ inputs.end_month }}
+        run: |
+          set -euo pipefail
+          python -m deta.cli --db artifacts/two-year.sqlite3 reconcile-archive-klines \
+            --market "$MARKET" --symbol "$SYMBOL" --interval "$INTERVAL" \
+            --start-month "$START_MONTH" --end-month "$END_MONTH" \
+            > artifacts/reconciliation.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/reconciliation.json").read_text())
+          fields = (
+              "missing_from_manifest",
+              "verified_but_not_imported",
+              "failed_archives",
+              "discovered_or_downloaded",
+              "non_importable_archives",
+              "missing_checksum_or_size",
+              "missing_import_timestamp",
+              "imported_row_count_mismatches",
+              "manifest_entries_not_in_current_source_listing",
+          )
+          problems = {field: report.get(field) for field in fields if report.get(field)}
+          source_count = report.get("source_listed_archive_count", 0)
+          imported_count = len(report.get("imported_archives", []))
+          if source_count == 0:
+              problems["source_listed_archive_count"] = source_count
+          if imported_count != source_count:
+              problems["source_vs_imported_count"] = {
+                  "source_listed": source_count,
+                  "imported": imported_count,
+              }
+          if problems:
+              print(json.dumps({"result": "FAIL", "problems": problems}, indent=2))
+              raise SystemExit(1)
+          print(json.dumps({
+              "result": "PASS",
+              "source_listed_archive_count": source_count,
+              "imported_archive_count": imported_count,
+              "scope": {
+                  "market": report.get("market"),
+                  "symbol": report.get("symbol"),
+                  "interval": report.get("interval"),
+                  "requested_months": report.get("requested_months"),
+              },
+              "limitation": "This proves only the requested market/symbol/interval/window; it does not prove other symbols or intervals.",
+          }, indent=2))
+          PY
+
+      - name: Audit every expected timestamp and stored OHLCV payload in the two-year range
+        if: always() && steps.import.outcome == 'success'
+        env:
+          MARKET_TYPE: ${{ steps.bounds.outputs.market_type }}
+          SYMBOL: ${{ inputs.symbol }}
+          INTERVAL: ${{ inputs.interval }}
+          START_MS: ${{ steps.bounds.outputs.start_ms }}
+          END_MS: ${{ steps.bounds.outputs.end_ms }}
+        run: |
+          set -euo pipefail
+          python -m deta.cli --db artifacts/two-year.sqlite3 audit-kline-gaps \
+            --market-type "$MARKET_TYPE" --symbol "$SYMBOL" --interval "$INTERVAL" \
+            --start-ms "$START_MS" --end-ms "$END_MS" \
+            > artifacts/candle-audit.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/candle-audit.json").read_text())
+          print(json.dumps({
+              "expected_candles": report["expected_candles"],
+              "stored_timestamp_rows": report["stored_timestamp_rows"],
+              "stored_distinct_timestamps": report["stored_distinct_timestamps"],
+              "missing_candle_count": report["missing_candle_count"],
+              "duplicate_timestamp_count": report["duplicate_timestamp_count"],
+              "unexpected_off_grid_timestamps": len(report["unexpected_off_grid_timestamps"]),
+              "invalid_candle_payload_count": report["invalid_candle_payload_count"],
+              "first_missing_timestamps_ms": report["first_missing_timestamps_ms"],
+              "first_invalid_candle_payloads": report["first_invalid_candle_payloads"],
+          }, indent=2))
+          PY
+
+      - name: Audit imported archive provenance
+        if: always() && steps.import.outcome == 'success'
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+        run: |
+          set -euo pipefail
+          case "$MARKET" in
+            spot) MARKET_TYPE=spot ;;
+            usd-m) MARKET_TYPE=usd_m ;;
+            coin-m) MARKET_TYPE=coin_m ;;
+          esac
+          python -m deta.cli --db artifacts/two-year.sqlite3 archive-manifest \
+            --market-type "$MARKET_TYPE" --data-type "klines_${{ inputs.interval }}" --symbol "$SYMBOL" \
+            > artifacts/archive-manifest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/archive-manifest.json").read_text())
+          print(json.dumps({
+              "archive_count": report["archive_count"],
+              "status_counts": report["status_counts"],
+              "audit_passed": report["audit_passed"],
+              "imported_provenance_audit_failures": report["imported_provenance_audit_failures"],
+          }, indent=2))
+          if not report["audit_passed"]:
+              raise SystemExit(1)
+          PY
+
+      - name: Record database status
+        if: always()
+        run: |
+          if [[ -f artifacts/two-year.sqlite3 ]]; then
+            python -m deta.cli --db artifacts/two-year.sqlite3 status > artifacts/status.json || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: binance-two-year-coverage-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
