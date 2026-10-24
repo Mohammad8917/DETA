@@ -431,3 +431,47 @@ def test_archive_import_rolls_back_when_existing_record_conflicts(tmp_path: Path
                  AND record_key='1704067200000'"""
         ).fetchone()
         assert stored[0] == '{"close": "0.9"}'
+
+
+def test_archive_manifest_upsert_cannot_change_url_dataset_identity(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    with SQLiteStore(tmp_path / "immutable-identity.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        with pytest.raises(ValueError, match="identity is immutable"):
+            store.upsert_archive_manifest(
+                archive_url=url, exchange_id="binance", market_type="spot",
+                data_type="klines_1m", symbol="ETHUSDT", archive_period="2024-01",
+                status="discovered",
+            )
+        manifest = store.archive_manifest_summary()[0]
+        assert manifest["symbol"] == "BTCUSDT"
+        assert manifest["checksum_sha256"] == "a" * 64
+
+
+def test_archive_manifest_upsert_does_not_downgrade_imported_state(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord(
+        "binance", "spot", "klines_1m", "BTCUSDT",
+        1_704_067_200_000, "1704067200000", {"close": "1"},
+    )
+    with SQLiteStore(tmp_path / "monotonic-status.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        store.save_archive_batch(url, [record], cursor="1704067200001")
+        before = store.archive_manifest_summary()[0]
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        after = store.archive_manifest_summary()[0]
+        assert before["status"] == after["status"] == "imported"
+        assert before["imported_at"] == after["imported_at"]
+        assert store.archive_provenance_summary(url)["payload_hash_mismatches"] == 0
