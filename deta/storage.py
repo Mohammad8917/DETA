@@ -215,10 +215,9 @@ class SQLiteStore:
             return inserted_rows
 
     def archive_provenance_summary(self, archive_url: str) -> dict[str, int]:
-        """Count provenance rows and rows whose corresponding stored record still exists."""
-        row = self._connection.execute(
-            """SELECT COUNT(*),
-                      SUM(CASE WHEN r.record_key IS NOT NULL THEN 1 ELSE 0 END)
+        """Verify archive provenance against stored record existence and payload fingerprints."""
+        rows = self._connection.execute(
+            """SELECT p.record_key, p.payload_sha256, r.payload_json
                FROM archive_record_provenance p
                LEFT JOIN records r
                  ON r.exchange_id=p.exchange_id AND r.market_type=p.market_type
@@ -226,8 +225,21 @@ class SQLiteStore:
                 AND r.record_key=p.record_key
                WHERE p.archive_url=?""",
             (archive_url,),
-        ).fetchone()
-        return {"provenance_rows": int(row[0] or 0), "stored_record_rows": int(row[1] or 0)}
+        ).fetchall()
+        stored_count = 0
+        payload_mismatches = 0
+        for _record_key, expected_hash, payload_json in rows:
+            if payload_json is None:
+                continue
+            stored_count += 1
+            actual_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+            if actual_hash != expected_hash:
+                payload_mismatches += 1
+        return {
+            "provenance_rows": len(rows),
+            "stored_record_rows": stored_count,
+            "payload_hash_mismatches": payload_mismatches,
+        }
 
     def update_checkpoint(self, exchange_id: str, market_type: str, data_type: str,
                           symbol: str, cursor: str | None, status: str, detail: str = "") -> None:
