@@ -540,3 +540,47 @@ def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, caplog) -> Non
     ])
     assert result == 2
     assert "align" in caplog.text
+
+
+
+@pytest.mark.parametrize(
+    ("start_month", "end_month", "message"),
+    [
+        ("2024-13", "2025-01", "real calendar month"),
+        ("2024-1", "2024-02", "exactly YYYY-MM"),
+        ("2024-03", "2024-02", "less than or equal"),
+    ],
+)
+def test_reconcile_rejects_invalid_month_bounds_before_source_access(
+    tmp_path: Path, monkeypatch, caplog,
+    start_month: str, end_month: str, message: str,
+) -> None:
+    class NetworkMustNotBeCalled:
+        def __init__(self, market: str) -> None:
+            raise AssertionError("source adapter must not be created for invalid bounds")
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", NetworkMustNotBeCalled)
+    result = cli.main([
+        "--db", str(tmp_path / "invalid-range.sqlite3"), "reconcile-archive-klines",
+        "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-month", start_month, "--end-month", end_month,
+    ])
+    assert result == 2
+    assert message in caplog.text
+
+
+def test_archive_backfill_rejects_reversed_month_range_before_source_access(
+    tmp_path: Path, monkeypatch, caplog,
+) -> None:
+    class NetworkMustNotBeCalled:
+        def __init__(self, market: str) -> None:
+            raise AssertionError("source adapter must not be created for invalid bounds")
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", NetworkMustNotBeCalled)
+    result = cli.main([
+        "--db", str(tmp_path / "invalid-backfill-range.sqlite3"),
+        "backfill-archive-klines", "--market", "spot", "--symbols", "BTCUSDT",
+        "--intervals", "1m", "--start-month", "2024-03", "--end-month", "2024-02",
+    ])
+    assert result == 2
+    assert "less than or equal" in caplog.text
