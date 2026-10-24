@@ -619,6 +619,36 @@ def test_audit_kline_gaps_rejects_invalid_ohlcv_payload(
     }]
 
 
+
+@pytest.mark.parametrize(
+    ("payload", "expected_issue"),
+    [
+        ({"high": "2", "low": "1", "close": "1.5", "volume": "1"}, "missing_open"),
+        ({"open": "1", "high": "NaN", "low": "1", "close": "1.5", "volume": "1"}, "non_finite_high"),
+        ({"open": "1", "high": "2", "low": "1", "close": "1.5", "volume": "-1"}, "negative_volume"),
+        ({"open": "0", "high": "2", "low": "0", "close": "1", "volume": "1"}, "non_positive_open"),
+        ({"open": "1", "high": "2", "low": "1", "close": "1.5", "volume": "Infinity"}, "non_finite_volume"),
+    ],
+)
+def test_audit_kline_gaps_rejects_invalid_numeric_ohlcv_fields(
+    tmp_path: Path, capsys, payload: dict[str, str], expected_issue: str,
+) -> None:
+    database = tmp_path / "invalid-numeric-ohlcv.sqlite3"
+    with SQLiteStore(database) as store:
+        store.save_batch([
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 0, "row", payload),
+        ], cursor="1")
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "0",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["invalid_candle_payload_count"] == 1
+    assert report["first_invalid_candle_payloads"][0]["issues"] == [expected_issue]
+
+
 def test_audit_kline_gaps_detects_duplicate_timestamps(
     tmp_path: Path, capsys,
 ) -> None:
