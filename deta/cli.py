@@ -829,8 +829,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 discovered_or_downloaded = [url for url in source_urls
                     if url in by_url and by_url[url]["status"] in {"discovered", "downloaded"}]
                 missing_checksum = [url for url in source_urls
-                    if url in by_url and (not by_url[url]["checksum_sha256"]
-                        or by_url[url]["size_bytes"] is None)]
+                    if url in by_url and (
+                        not isinstance(by_url[url]["checksum_sha256"], str)
+                        or len(str(by_url[url]["checksum_sha256"])) != 64
+                        or any(char not in "0123456789abcdefABCDEF"
+                               for char in str(by_url[url]["checksum_sha256"]))
+                        or not isinstance(by_url[url]["size_bytes"], int)
+                        or by_url[url]["size_bytes"] <= 0
+                    )]
+                missing_import_timestamp = [
+                    url for url in imported
+                    if not isinstance(by_url[url]["imported_at"], str)
+                    or not by_url[url]["imported_at"].strip()
+                ]
                 manifest_not_listed = [
                     str(entry["archive_url"]) for entry in scoped_manifest
                     if str(entry["archive_url"]) not in listed
@@ -847,7 +858,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "failed_archives": failed,
                     "imported_archives": imported,
                     "discovered_or_downloaded": discovered_or_downloaded,
-                    "missing_checksum_or_size": missing_checksum,
+                    "missing_checksum_or_size_or_invalid_integrity_metadata": missing_checksum,
+                    "missing_import_timestamp": missing_import_timestamp,
                     "manifest_entries_not_in_current_source_listing": manifest_not_listed,
                     "coverage_claim": (
                         "This reconciles the current official monthly/daily source listing against the local manifest only. "
@@ -863,6 +875,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     and not failed
                     and not discovered_or_downloaded
                     and not missing_checksum
+                    and not missing_import_timestamp
                     and not manifest_not_listed
                     and len(imported) == len(source_urls)
                 )
