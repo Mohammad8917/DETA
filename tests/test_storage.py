@@ -475,3 +475,19 @@ def test_archive_manifest_upsert_does_not_downgrade_imported_state(tmp_path: Pat
         assert before["status"] == after["status"] == "imported"
         assert before["imported_at"] == after["imported_at"]
         assert store.archive_provenance_summary(url)["payload_hash_mismatches"] == 0
+
+
+def test_archive_manifest_upsert_migrates_legacy_daily_period_to_exact_date(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/daily/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01-31.zip"
+    with SQLiteStore(tmp_path / "legacy-daily-period.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="discovered",
+        )
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01-31",
+            status="discovered",
+        )
+        assert store.archive_manifest_summary()[0]["archive_period"] == "2024-01-31"
