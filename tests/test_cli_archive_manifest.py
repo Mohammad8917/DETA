@@ -511,6 +511,30 @@ def test_reconcile_archive_klines_includes_daily_manifest_period_in_month_scope(
     assert report["manifest_entries_not_in_current_source_listing"] == []
 
 
+def test_reconcile_archive_klines_fails_when_import_timestamp_is_missing(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchive)
+    database = tmp_path / "missing-import-time.sqlite3"
+    with SQLiteStore(database) as store:
+        _save_imported_kline(store, ARCHIVE_URL, "2024-01")
+        store._connection.execute(
+            "UPDATE archive_manifest SET imported_at = NULL WHERE archive_url = ?",
+            (ARCHIVE_URL,),
+        )
+        store._connection.commit()
+
+    result = cli.main([
+        "--db", str(database), "reconcile-archive-klines",
+        "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-month", "2024-01", "--end-month", "2024-01",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_import_timestamp"] == [ARCHIVE_URL]
+    assert report["imported_archives"] == [ARCHIVE_URL]
+
+
 def test_audit_kline_gaps_reports_missing_timestamp_in_bounded_range(
     tmp_path: Path, capsys,
 ) -> None:
