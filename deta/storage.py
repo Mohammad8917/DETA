@@ -212,28 +212,25 @@ class SQLiteStore:
             raise ValueError("Archive contains records outside its declared UTC period")
         with self._connection:
             record_keys = [record.record_key for record in records]
-            existing_keys: set[str] = set()
+            existing_records: dict[str, tuple[int, str]] = {}
             for offset in range(0, len(record_keys), 500):
                 chunk = record_keys[offset:offset + 500]
                 placeholders = ",".join("?" for _ in chunk)
                 found = self._connection.execute(
-                    f"""SELECT record_key FROM records
+                    f"""SELECT record_key, timestamp_ms, payload_json FROM records
                         WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
                           AND record_key IN ({placeholders})""",
                     (*identity, *chunk),
                 ).fetchall()
-                existing_keys.update(str(row[0]) for row in found)
+                existing_records.update({
+                    str(row[0]): (int(row[1]), str(row[2])) for row in found
+                })
             # Never silently overwrite a conflicting row from an unrelated import.
             # Same-key rows may be replayed idempotently only when their timestamp and
             # canonical payload are identical. A changed archive checksum invalidates and
             # removes its old, unshared rows before this method is called again.
             for record in records:
-                stored = self._connection.execute(
-                    """SELECT timestamp_ms, payload_json FROM records
-                       WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
-                         AND record_key=?""",
-                    (*identity, record.record_key),
-                ).fetchone()
+                stored = existing_records.get(record.record_key)
                 if stored is None:
                     continue
                 canonical_payload = json.dumps(
@@ -244,7 +241,7 @@ class SQLiteStore:
                         "Archive import conflicts with an existing stored record "
                         f"for key {record.record_key}"
                     )
-            inserted_rows = len(record_keys) - len(existing_keys)
+            inserted_rows = len(record_keys) - len(existing_records)
             self._connection.executemany(
                 """INSERT INTO records(exchange_id, market_type, data_type, symbol,
                    timestamp_ms, record_key, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)
