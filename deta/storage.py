@@ -314,6 +314,35 @@ class SQLiteStore:
                 (exchange_id, market_type, data_type, symbol, cursor, status, detail),
             )
 
+    def _invalidate_archive_provenance(self, archive_url: str) -> None:
+        """Remove old archive evidence and records not owned by any other archive."""
+        self._connection.execute(
+            """DELETE FROM records
+               WHERE EXISTS (
+                   SELECT 1 FROM archive_record_provenance p
+                   WHERE p.archive_url=?
+                     AND records.exchange_id=p.exchange_id
+                     AND records.market_type=p.market_type
+                     AND records.data_type=p.data_type
+                     AND records.symbol=p.symbol
+                     AND records.record_key=p.record_key
+                     AND NOT EXISTS (
+                         SELECT 1 FROM archive_record_provenance other
+                         WHERE other.archive_url<>p.archive_url
+                           AND other.exchange_id=p.exchange_id
+                           AND other.market_type=p.market_type
+                           AND other.data_type=p.data_type
+                           AND other.symbol=p.symbol
+                           AND other.record_key=p.record_key
+                     )
+               )""",
+            (archive_url,),
+        )
+        self._connection.execute(
+            "DELETE FROM archive_record_provenance WHERE archive_url=?",
+            (archive_url,),
+        )
+
     def upsert_archive_manifest(
         self,
         *,
@@ -359,10 +388,7 @@ class SQLiteStore:
             if checksum_changed and status == "imported":
                 raise ValueError("A changed archive checksum must be verified before it can be marked imported")
             if checksum_changed:
-                self._connection.execute(
-                    "DELETE FROM archive_record_provenance WHERE archive_url=?",
-                    (archive_url,),
-                )
+                self._invalidate_archive_provenance(archive_url)
             self._connection.execute(
                 """INSERT INTO archive_manifest(
                        archive_url, exchange_id, market_type, data_type, symbol, archive_period,
@@ -439,12 +465,7 @@ class SQLiteStore:
                 imported_at if imported_at is not None else previous_imported_at
             )
             if checksum_changed:
-                # Provenance belongs to the exact archive content version. Keeping it
-                # after a checksum change would make old rows look like new-import evidence.
-                self._connection.execute(
-                    "DELETE FROM archive_record_provenance WHERE archive_url=?",
-                    (archive_url,),
-                )
+                self._invalidate_archive_provenance(archive_url)
             effective_status = status
             if previous_status == "imported" and not checksum_changed and status in {
                 "discovered", "downloaded", "verified"
