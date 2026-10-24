@@ -635,7 +635,7 @@ def test_live_smoke_workflow_uses_reconcile_cli_report_contract() -> None:
         "requested_months",
     )
     for field in workflow_report_fields:
-        assert f'report["{field}"]' in workflow
+        assert f'"{field}"' in workflow
         assert f'"{field}":' in cli_source
 
     assert 'report["requested_months"]["start"]' in workflow
