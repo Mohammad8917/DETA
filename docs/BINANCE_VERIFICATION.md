@@ -231,3 +231,15 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - Regression tests cover discovery across both indexes, all symbol/interval combinations being attempted, aggregation of a mixed pass/fail batch, and fail-closed invalid-month handling.
 - GitHub Actions run [40116008045](https://github.com/Mohammad8917/DETA/actions/runs/40116008045) completed successfully: **114 tests passed** for commit `b50158186e3945bf18486121b363f602523122cf`.
 - This is a batch orchestration capability and unit-test evidence only. The batch command has not been run against the live source across the complete intended two-year scope in this evidence snapshot. Source listing, Manifest reconciliation, stored timestamp-gap audits, and OHLCV payload audits remain separate checks; no full-coverage claim is made.
+
+## First live two-year bounded kline coverage proof — COVERAGE-VERIFIED (2026-10-24)
+
+- GitHub Actions run [40138793698](https://github.com/Mohammad8917/DETA/actions/runs/40138793698) completed successfully on main commit `65fd92fe5259ce2ac219353af29f7836cc5dc6f2`.
+- Exact scope: Binance Spot, `BTCUSDT`, `15m`, inclusive archive months `2024-10` through `2026-09` (24 calendar months).
+- Live source reconciliation listed 24 official monthly archives and found all 24 imported. No source-listed archive was missing from the Manifest; no listed archive remained verified-but-not-imported, failed, discovered/downloaded, non-importable, or missing checksum/size/import timestamp; no imported provenance row-count/payload/timestamp mismatch was reported.
+- Stored-candle audit: expected 70,080; stored timestamp rows 70,080; distinct timestamps 70,080; missing candles 0; duplicate timestamps 0; off-grid timestamps 0; invalid OHLCV payloads 0.
+- Archive provenance audit: 24 archives, all marked imported; `audit_passed=true`; zero imported provenance audit failures.
+- The workflow uploaded artifact [binance-two-year-coverage-40138793698](https://github.com/Mohammad8917/DETA/actions/runs/40138793698/artifacts/12577203350), containing the SQLite database and machine-readable reports.
+- **Evidence level: COVERAGE-VERIFIED for this exact bounded dataset only.** This is not proof for other symbols, intervals, Spot instruments, USDⓈ-M, COIN-M, or other dataset families. It also cannot prove that Binance's upstream source inventory is exhaustive beyond the official S3 listing returned during this run.
+- Follow-up reporting fix: the run's reconciliation summary displayed `interval: null` because the CLI omitted the interval field, even though the actual reconciliation and candle-audit commands used `15m`. PR [#2](https://github.com/Mohammad8917/DETA/pull/2) added the field and regression assertions; its unit-test workflow [40139085596](https://github.com/Mohammad8917/DETA/actions/runs/40139085596) passed, and it was merged as `6716d3f4fb486b9c0499695345294a4d38bdc2d6`. The original artifact remains the evidence for the live data run; the reporting fix does not retroactively alter that artifact.
+
