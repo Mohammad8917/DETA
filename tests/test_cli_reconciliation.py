@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from deta import cli
+from deta.domain import DataRecord
 from deta.storage import SQLiteStore
 
 
@@ -73,6 +74,15 @@ def _register_imported_archive(db_path: Path) -> None:
             imported_at="2026-10-24T00:00:00+00:00",
             row_count=10,
         )
+        records = [
+            DataRecord(
+                "binance", "spot", "klines_1m", "BTCUSDT",
+                1_704_067_200_000 + index * 60_000, str(1_704_067_200_000 + index * 60_000),
+                {"close": "1"},
+            )
+            for index in range(10)
+        ]
+        store.save_batch(records, cursor=str(records[-1].timestamp_ms + 1))
 
 
 def test_reconciliation_fails_when_source_archive_is_missing_from_manifest(
@@ -104,6 +114,30 @@ def test_reconciliation_passes_only_when_listed_archive_is_imported_and_verified
     assert report["missing_from_manifest"] == []
     assert exit_code == 0
 
+
+
+def test_reconciliation_fails_when_manifest_says_imported_but_database_rows_are_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "missing-imported-rows.sqlite3"
+    _register_imported_archive(db_path)
+    # Remove all records while preserving the imported manifest, simulating stale or
+    # manually fabricated import evidence.
+    with SQLiteStore(db_path) as store:
+        store._connection.execute("DELETE FROM records")
+        store._connection.commit()
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    exit_code = cli.main(_args(db_path))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["imported_row_count_mismatches"] == [{
+        "archive_url": ARCHIVE_URL,
+        "archive_period": "2024-01",
+        "manifest_row_count": 10,
+        "stored_distinct_timestamp_count": 0,
+    }]
+    assert exit_code == 1
 
 def test_reconciliation_fails_when_archive_is_verified_but_not_imported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
