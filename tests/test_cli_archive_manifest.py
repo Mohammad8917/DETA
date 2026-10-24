@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from deta.domain import DataRecord
@@ -77,8 +78,9 @@ class FakeArchive:
         self.last_verified_size_bytes = len(ARCHIVE_BYTES)
         return [
             DataRecord(
-                "binance", "usd_m", f"{price_type}_klines_1m", "BTCUSDT",
-                1704067200000, "1704067200000",
+                "binance", "usd_m",
+                f"{ {'markPrice': 'mark_price', 'indexPrice': 'index_price', 'premiumIndex': 'premium_index'}[price_type] }_klines_1m",
+                "BTCUSDT", 1704067200000, "1704067200000",
                 {"close": "2", "archive_url": url},
             )
         ]
@@ -86,6 +88,29 @@ class FakeArchive:
     def close(self) -> None:
         pass
 
+
+
+def _save_imported_kline(
+    store: SQLiteStore, url: str, period: str, *, market_type: str = "spot",
+) -> None:
+    """Create a genuinely imported archive fixture with matching provenance."""
+    fmt = "%Y-%m-%d" if len(period) == 10 else "%Y-%m"
+    timestamp_ms = int(
+        datetime.strptime(period, fmt).replace(tzinfo=timezone.utc).timestamp() * 1000
+    )
+    store.upsert_archive_manifest(
+        archive_url=url, exchange_id="binance", market_type=market_type,
+        data_type="klines_1m", symbol="BTCUSDT", archive_period=period,
+    )
+    store.update_archive_manifest(
+        url, status="verified", checksum_sha256=hashlib.sha256(ARCHIVE_BYTES).hexdigest(),
+        size_bytes=len(ARCHIVE_BYTES), row_count=1,
+    )
+    record = DataRecord(
+        "binance", market_type, "klines_1m", "BTCUSDT",
+        timestamp_ms, str(timestamp_ms), {"close": "2", "archive_url": url},
+    )
+    store.save_archive_batch(url, [record], cursor=str(timestamp_ms + 60_000))
 
 def test_kline_import_updates_manifest_only_after_verified_data_is_saved(
     tmp_path: Path, monkeypatch,
@@ -298,7 +323,7 @@ def test_archive_manifest_cli_reports_status_counts(
     assert report["archive_count"] == 1
     assert report["status_counts"] == {"discovered": 1}
     assert report["archives"][0]["archive_url"] == ARCHIVE_URL
-    assert "not proof" in report["coverage_claim"]
+    assert "do not by themselves prove exhaustive source coverage" in report["coverage_claim"]
 
 def test_empty_verified_archive_is_not_marked_imported(
     tmp_path: Path, monkeypatch, capsys,
@@ -395,7 +420,7 @@ def test_reconcile_archive_klines_compares_source_listing_with_manifest(
         "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
         "--start-month", "2024-01", "--end-month", "2024-02",
     ])
-    assert result == 0
+    assert result == 1
     report = json.loads(capsys.readouterr().out)
     assert report["source_listed_archive_count"] == 2
     assert report["verified_but_not_imported"] == [ARCHIVE_URL]
@@ -433,18 +458,13 @@ def test_reconcile_archive_klines_reports_stale_manifest_entries_and_daily_fallb
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", DailyFallbackArchive)
     database = tmp_path / "data.sqlite3"
     with SQLiteStore(database) as store:
-        store.upsert_archive_manifest(
-            archive_url=stale_url, exchange_id="binance", market_type="spot",
-            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
-            status="imported", checksum_sha256=hashlib.sha256(ARCHIVE_BYTES).hexdigest(),
-            size_bytes=len(ARCHIVE_BYTES), row_count=1, imported_at="2024-01-31T00:00:00+00:00",
-        )
+        _save_imported_kline(store, stale_url, "2024-01")
     result = cli.main([
         "--db", str(database), "reconcile-archive-klines",
         "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
         "--start-month", "2024-01", "--end-month", "2024-02",
     ])
-    assert result == 0
+    assert result == 1
     report = json.loads(capsys.readouterr().out)
     assert report["source_listed_archive_count"] == 1
     assert report["missing_from_manifest"] == [daily_url]
@@ -476,12 +496,7 @@ def test_reconcile_archive_klines_includes_daily_manifest_period_in_month_scope(
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", DailyArchive)
     database = tmp_path / "data.sqlite3"
     with SQLiteStore(database) as store:
-        store.upsert_archive_manifest(
-            archive_url=daily_url, exchange_id="binance", market_type="spot",
-            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-02-01",
-            status="imported", checksum_sha256=hashlib.sha256(ARCHIVE_BYTES).hexdigest(),
-            size_bytes=len(ARCHIVE_BYTES), row_count=10, imported_at="2024-02-02T00:00:00+00:00",
-        )
+        _save_imported_kline(store, daily_url, "2024-02-01")
     result = cli.main([
         "--db", str(database), "reconcile-archive-klines",
         "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
