@@ -100,7 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--market", choices=("spot", "usd-m", "coin-m"), required=True)
     reconcile.add_argument("--symbol", required=True, help="One symbol/contract")
-    reconcile.add_argument("--interval", required=True, choices=BinanceArchiveAdapter.candle_intervals)
+    reconcile.add_argument(
+        "--interval", required=True,
+        choices=("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"),
+    )
     reconcile.add_argument("--start-month", required=True, help="Inclusive YYYY-MM")
     reconcile.add_argument("--end-month", required=True, help="Inclusive YYYY-MM")
     commands.add_parser("status", help="Show locally stored dataset coverage/status")
