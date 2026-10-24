@@ -93,3 +93,10 @@ These implementations are not yet proven end-to-end against the live source acro
 - **PARTIAL / UNAVAILABLE / FAILED:** must be reported accurately; never upgraded to complete without evidence.
 
 Update this ledger in the same change that upgrades any dataset family to LIVE-VERIFIED, COVERAGE-VERIFIED, or LOCKED.
+
+## Bounded stored-kline timestamp gap audit — unit-verified
+
+- The `audit-kline-gaps` CLI checks distinct stored timestamps for one Binance market, symbol, interval, and explicitly bounded inclusive UTC-millisecond range. It computes expected candle-open timestamps, reports missing timestamps and off-grid observations, and rejects invalid or excessively large ranges.
+- Storage lookup is scoped to the requested dataset and range and returns timestamps in ascending order. Supported market identifiers match the persisted DETA values: `spot`, `usd_m`, and `coin_m`.
+- Regression tests cover a missing 1-minute candle and rejection of a non-aligned range. The initial validation test failed because it inspected stderr rather than pytest's captured logger; commit `19c3552e` corrected the test to assert captured logging. CI run [40070504672](https://github.com/Mohammad8917/DETA/actions/runs/40070504672) passed.
+- **Evidence level: UNIT-VERIFIED only.** This audit proves timestamp continuity only for records already stored in the selected database and bounded range. It does not establish that Binance supplied every expected candle, validate OHLCV payload correctness, or prove historical archive completeness. No live audit result is claimed here.
