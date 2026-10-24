@@ -502,6 +502,29 @@ class SQLiteStore:
                 effective_status = "imported"
             if checksum_changed and status == "imported":
                 raise ValueError("A changed archive checksum must be verified before it can be marked imported")
+            if status == "imported":
+                effective_row_count = row_count
+                if effective_row_count is None:
+                    count_row = self._connection.execute(
+                        "SELECT row_count FROM archive_manifest WHERE archive_url=?",
+                        (archive_url,),
+                    ).fetchone()
+                    effective_row_count = None if count_row is None else count_row[0]
+                provenance = self.archive_provenance_summary(archive_url)
+                if (
+                    not isinstance(previous_checksum, str)
+                    or len(previous_checksum) != 64
+                    or not isinstance(effective_row_count, int)
+                    or effective_row_count <= 0
+                    or provenance["provenance_rows"] != effective_row_count
+                    or provenance["stored_record_rows"] != effective_row_count
+                    or provenance["timestamp_mismatches"] != 0
+                    or provenance["payload_hash_mismatches"] != 0
+                ):
+                    raise ValueError(
+                        "An archive can be marked imported only when its verified provenance "
+                        "matches every stored record"
+                    )
             cursor = self._connection.execute(
                 """UPDATE archive_manifest SET
                        checksum_sha256=COALESCE(?, checksum_sha256),
