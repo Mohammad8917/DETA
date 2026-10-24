@@ -607,14 +607,14 @@ class SQLiteStore:
         self, *, exchange_id: str, market_type: str, data_type: str, symbol: str,
         start_ms: int, end_ms: int,
     ) -> list[int]:
-        """Read distinct stored timestamps for one bounded dataset window, in ascending order."""
+        """Read all stored timestamps for one bounded dataset window, in ascending order."""
         if start_ms < 0 or end_ms < start_ms:
             raise ValueError("Invalid timestamp range")
         rows = self._connection.execute(
-            """SELECT DISTINCT timestamp_ms FROM records
+            """SELECT timestamp_ms FROM records
                WHERE exchange_id=? AND market_type=? AND data_type=? AND symbol=?
                  AND timestamp_ms>=? AND timestamp_ms<=?
-               ORDER BY timestamp_ms""",
+               ORDER BY timestamp_ms, record_key""",
             (exchange_id, market_type, data_type, symbol, start_ms, end_ms),
         ).fetchall()
         return [int(row[0]) for row in rows]
