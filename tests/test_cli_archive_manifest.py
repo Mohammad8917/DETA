@@ -363,3 +363,41 @@ def test_archive_without_checksum_metadata_is_not_counted_as_verified(
         assert manifest[0]["status"] == "failed"
         assert "without verified checksum metadata" in manifest[0]["error"]
         assert manifest[0]["imported_at"] is None
+
+
+def test_reconcile_archive_klines_compares_source_listing_with_manifest(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    feb_url = (
+        "https://data.binance.vision/data/spot/monthly/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2024-02.zip"
+    )
+
+    class ListedArchive(FakeArchive):
+        def list_monthly_archives(
+            self, symbol: str, interval: str, start_month: str | None = None,
+            end_month: str | None = None,
+        ) -> list[str]:
+            return [ARCHIVE_URL, feb_url]
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", ListedArchive)
+    database = tmp_path / "data.sqlite3"
+    with SQLiteStore(database) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256=hashlib.sha256(ARCHIVE_BYTES).hexdigest(),
+            size_bytes=len(ARCHIVE_BYTES), row_count=0,
+        )
+    result = cli.main([
+        "--db", str(database), "reconcile-archive-klines",
+        "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-month", "2024-01", "--end-month", "2024-02",
+    ])
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["source_listed_archive_count"] == 2
+    assert report["verified_but_not_imported"] == [ARCHIVE_URL]
+    assert report["missing_from_manifest"] == [feb_url]
+    assert report["imported_archives"] == []
+    assert "cannot prove" in report["coverage_claim"]
