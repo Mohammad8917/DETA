@@ -448,8 +448,18 @@ class SQLiteStore:
                        symbol=excluded.symbol,
                        archive_period=excluded.archive_period,
                        checksum_sha256=COALESCE(excluded.checksum_sha256, archive_manifest.checksum_sha256),
-                       size_bytes=COALESCE(excluded.size_bytes, archive_manifest.size_bytes),
-                       row_count=COALESCE(excluded.row_count, archive_manifest.row_count),
+                       size_bytes=CASE
+                           WHEN excluded.checksum_sha256 IS NOT NULL
+                            AND archive_manifest.checksum_sha256 IS NOT NULL
+                            AND lower(excluded.checksum_sha256) != lower(archive_manifest.checksum_sha256)
+                           THEN excluded.size_bytes
+                           ELSE COALESCE(excluded.size_bytes, archive_manifest.size_bytes) END,
+                       row_count=CASE
+                           WHEN excluded.checksum_sha256 IS NOT NULL
+                            AND archive_manifest.checksum_sha256 IS NOT NULL
+                            AND lower(excluded.checksum_sha256) != lower(archive_manifest.checksum_sha256)
+                           THEN excluded.row_count
+                           ELSE COALESCE(excluded.row_count, archive_manifest.row_count) END,
                        status=CASE
                            WHEN excluded.checksum_sha256 IS NOT NULL
                             AND archive_manifest.checksum_sha256 IS NOT NULL
@@ -555,11 +565,12 @@ class SQLiteStore:
             cursor = self._connection.execute(
                 """UPDATE archive_manifest SET
                        checksum_sha256=COALESCE(?, checksum_sha256),
-                       size_bytes=COALESCE(?, size_bytes),
-                       row_count=COALESCE(?, row_count),
+                       size_bytes=CASE WHEN ? THEN ? ELSE COALESCE(?, size_bytes) END,
+                       row_count=CASE WHEN ? THEN ? ELSE COALESCE(?, row_count) END,
                        status=?, imported_at=?, error=?, updated_at=CURRENT_TIMESTAMP
                    WHERE archive_url=?""",
-                (checksum_sha256, size_bytes, row_count, effective_status,
+                (checksum_sha256, checksum_changed, size_bytes, size_bytes,
+                 checksum_changed, row_count, row_count, effective_status,
                  effective_imported_at, error, archive_url),
             )
             if cursor.rowcount != 1:
