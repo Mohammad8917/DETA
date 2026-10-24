@@ -103,3 +103,30 @@ def test_reconciliation_passes_only_when_listed_archive_is_imported_and_verified
     assert report["missing_checksum_or_size"] == []
     assert report["missing_from_manifest"] == []
     assert exit_code == 0
+
+
+def test_reconciliation_fails_when_archive_is_verified_but_not_imported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "verified.sqlite3"
+    with SQLiteStore(db_path) as store:
+        store.upsert_archive_manifest(
+            archive_url=ARCHIVE_URL,
+            exchange_id="binance",
+            market_type="spot",
+            data_type="klines_1m",
+            symbol="BTCUSDT",
+            archive_period="2024-01",
+            status="verified",
+            checksum_sha256="b" * 64,
+            size_bytes=1234,
+            row_count=10,
+        )
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    exit_code = cli.main(_args(db_path))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["verified_but_not_imported"] == [ARCHIVE_URL]
+    assert exit_code == 1
+
