@@ -179,6 +179,28 @@ def _archive_month(url: str) -> str:
     return _archive_period(url)[:7]
 
 
+def _validate_month_bounds(
+    start_month: str | None, end_month: str | None, *, require_both: bool = False,
+) -> str | None:
+    """Validate inclusive YYYY-MM bounds before any network or database mutation."""
+    if require_both and (start_month is None or end_month is None):
+        return "Both start-month and end-month are required for reconciliation"
+    parsed: dict[str, datetime] = {}
+    for label, value in (("start-month", start_month), ("end-month", end_month)):
+        if value is None:
+            continue
+        try:
+            parsed[label] = datetime.strptime(value, "%Y-%m")
+        except ValueError:
+            return f"Invalid {label} {value!r}; expected a real calendar month in YYYY-MM format"
+        if parsed[label].strftime("%Y-%m") != value:
+            return f"Invalid {label} {value!r}; expected exactly YYYY-MM format"
+    if "start-month" in parsed and "end-month" in parsed:
+        if parsed["start-month"] > parsed["end-month"]:
+            return "start-month must be less than or equal to end-month"
+    return None
+
+
 def _backfill_archive_klines(
     store: SQLiteStore,
     market: str,
@@ -716,6 +738,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     log = logging.getLogger("deta")
+    month_commands = {
+        "backfill-archive-klines", "backfill-archive-agg-trades",
+        "backfill-archive-trades", "backfill-archive-funding-rates",
+        "backfill-archive-price-klines", "reconcile-archive-klines",
+    }
+    if args.command in month_commands:
+        month_error = _validate_month_bounds(
+            getattr(args, "start_month", None),
+            getattr(args, "end_month", None),
+            require_both=args.command == "reconcile-archive-klines",
+        )
+        if month_error:
+            log.error("%s", month_error)
+            return 2
     with SQLiteStore(args.db) as store:
         if args.command == "status":
             print(json.dumps(store.dataset_summary(), indent=2, ensure_ascii=False))
