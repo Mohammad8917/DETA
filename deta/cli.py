@@ -280,9 +280,6 @@ def _backfill_archive_klines(
                             url, records, cursor=cursor, status="partial",
                             detail="Official monthly/daily archives imported with per-archive record provenance; full source coverage and gaps are not yet independently verified",
                         )
-                        store.update_archive_manifest(
-                            url, status="imported", imported_at=datetime.now(timezone.utc).isoformat(), row_count=len(records), error="",
-                        )
                         archives_imported += 1
                         pages_saved += 1
                         rows_saved += inserted
@@ -392,10 +389,6 @@ def _backfill_archive_funding_rates(
                     inserted = store.save_archive_batch(
                         url, records, cursor=str(cursor), status="partial",
                         detail="Official funding-rate archives imported with per-archive provenance; source coverage and gaps are not independently verified",
-                    )
-                    store.update_archive_manifest(
-                        url, status="imported", row_count=len(records),
-                        imported_at=datetime.now(timezone.utc).isoformat(), error="",
                     )
                     batches_saved += 1
                     rows_saved += inserted
@@ -521,10 +514,6 @@ def _backfill_archive_price_klines(
                         inserted = store.save_archive_batch(
                             url, records, cursor=cursor, status="partial",
                             detail=f"Official {price_type} archives imported with per-archive provenance; full coverage and gaps are not independently verified",
-                        )
-                        store.update_archive_manifest(
-                            url, status="imported", row_count=len(records),
-                            imported_at=datetime.now(timezone.utc).isoformat(), error="",
                         )
                         batches_saved += 1
                         rows_saved += inserted
@@ -658,10 +647,6 @@ def _backfill_archive_trade_dataset(
                     inserted = store.save_archive_batch(
                         url, records, cursor=cursor, status="partial",
                         detail=f"Official {description} archives imported with per-archive provenance; source coverage and gaps are not yet independently verified",
-                    )
-                    store.update_archive_manifest(
-                        url, status="imported", row_count=len(records),
-                        imported_at=datetime.now(timezone.utc).isoformat(), error="",
                     )
                     batches_saved += 1
                     rows_saved += inserted
