@@ -583,3 +583,33 @@ def test_archive_import_rolls_back_all_state_if_checkpoint_write_fails(tmp_path:
         assert manifest["status"] == "verified"
         assert manifest["imported_at"] is None
         assert store.get_checkpoint("binance", "spot", "klines_1m", "BTCUSDT") is None
+
+
+
+def test_checksum_change_clears_stale_size_and_row_count_metadata(tmp_path: Path) -> None:
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    with SQLiteStore(tmp_path / "checksum-metadata.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=10,
+        )
+        store.update_archive_manifest(
+            url, status="downloaded", checksum_sha256="b" * 64,
+        )
+        changed = store.archive_manifest_summary()[0]
+        assert changed["status"] == "downloaded"
+        assert changed["checksum_sha256"] == "b" * 64
+        assert changed["size_bytes"] is None
+        assert changed["row_count"] is None
+        assert changed["imported_at"] is None
+
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+            status="verified", checksum_sha256="c" * 64,
+        )
+        rediscovered = store.archive_manifest_summary()[0]
+        assert rediscovered["checksum_sha256"] == "c" * 64
+        assert rediscovered["size_bytes"] is None
+        assert rediscovered["row_count"] is None
