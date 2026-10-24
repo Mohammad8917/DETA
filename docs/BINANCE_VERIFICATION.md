@@ -4,8 +4,8 @@
 
 - Storage now exposes payloads for a bounded dataset/time window so the audit can inspect actual stored OHLCV fields, not timestamps alone.
 - `audit-kline-gaps` now fails closed if any candle in the requested range has missing/non-numeric/non-finite OHLCV fields, non-positive OHLC prices, negative volume, or inconsistent high/low bounds. The report includes a count and up to 100 examples.
-- Regression tests: `test_audit_kline_gaps_rejects_invalid_ohlcv_payload` plus parametrized cases for missing fields, non-finite values, non-positive prices, and negative volume.
-- GitHub Actions run [40115160404](https://github.com/Mohammad8917/DETA/actions/runs/40115160404) passed **111 tests** for commit `4e970064d671da6536ee3c2ca294e18cf042e077`.
+- Regression tests cover valid candles, inconsistent OHLC bounds, missing fields, non-finite values, non-positive prices, and negative volume.
+- GitHub Actions run [40115237192](https://github.com/Mohammad8917/DETA/actions/runs/40115237192) passed **112 tests** for commit `8a5f8c66559ccb30d2168e613f2f0d48c0125d26`.
 - Implementation commits: `b1932d8f22c48943a0034fcd3454a64e0515e8cb` (bounded payload retrieval), `3f0b823bafc5b5fa406cf82f946e2d5397598b23` (OHLCV validation), and `48517fd1c249f76d041f3f65995810177f772ce4` (regression test).
 - **Evidence boundary:** these are unit-test results. No live Binance smoke execution or two-year/all-symbol coverage proof is established by this change. OHLCV consistency checks also do not prove that every source archive/record exists.
 
