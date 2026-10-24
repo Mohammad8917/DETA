@@ -190,7 +190,7 @@ def _backfill_archive_klines(
             selected = [known.get(symbol, {"symbol": symbol})
                         for symbol in sorted(set(known) | archived)]
 
-        failed = archives_seen = pages_saved = rows_saved = 0
+        failed = archives_verified = archives_imported = pages_saved = rows_saved = 0
         for item in selected:
             symbol = str(item["symbol"])
             for interval in intervals:
@@ -222,7 +222,7 @@ def _backfill_archive_klines(
                             status="discovered",
                         )
                         records = archive.fetch_kline_archive(url)
-                        archives_seen += 1
+                        archives_verified += 1
                         digest = archive.last_verified_checksum_sha256
                         size_bytes = archive.last_verified_size_bytes
                         if digest is None or size_bytes is None:
@@ -251,6 +251,7 @@ def _backfill_archive_klines(
                         store.update_archive_manifest(
                             url, status="imported", imported_at=datetime.now(timezone.utc).isoformat(), row_count=len(records), error="",
                         )
+                        archives_imported += 1
                         pages_saved += 1
                         rows_saved += inserted
                     log.info("%s %s: processed %s official monthly archives", symbol, interval, len(urls))
@@ -274,7 +275,8 @@ def _backfill_archive_klines(
             "exchange": exchange_id,
             "market_type": market_type,
             "symbols_attempted": len(selected),
-            "archives_imported": archives_seen,
+            "archives_verified": archives_verified,
+            "archives_imported": archives_imported,
             "batches_saved": pages_saved,
             "new_rows_saved": rows_saved,
             "datasets_failed": failed,
