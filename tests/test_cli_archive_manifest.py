@@ -610,3 +610,34 @@ def test_archive_backfill_rejects_reversed_month_range_before_source_access(
     ])
     assert result == 2
     assert "less than or equal" in caplog.text
+
+
+def test_live_smoke_workflow_uses_reconcile_cli_report_contract() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    workflow = (
+        repository_root / ".github" / "workflows" / "binance-live-smoke.yml"
+    ).read_text(encoding="utf-8")
+    cli_source = (repository_root / "deta" / "cli.py").read_text(encoding="utf-8")
+
+    workflow_report_fields = (
+        "missing_from_manifest",
+        "verified_but_not_imported",
+        "failed_archives",
+        "discovered_or_downloaded",
+        "missing_checksum_or_size",
+        "missing_import_timestamp",
+        "imported_row_count_mismatches",
+        "manifest_entries_not_in_current_source_listing",
+        "source_listed_archive_count",
+        "imported_archives",
+        "market",
+        "symbol",
+        "requested_months",
+    )
+    for field in workflow_report_fields:
+        assert f'report["{field}"]' in workflow
+        assert f'"{field}":' in cli_source
+
+    assert 'report["requested_months"]["start"]' in workflow
+    assert 'report["requested_months"]["end"]' in workflow
+
