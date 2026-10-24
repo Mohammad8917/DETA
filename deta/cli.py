@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -267,9 +267,9 @@ def _backfill_archive_klines(
                         cursor = _monotonic_cursor(
                             store, exchange_id, market_type, data_type, symbol, last + 1
                         )
-                        inserted = store.save_batch(
-                            records, cursor=cursor, status="partial",
-                            detail="Official monthly/daily archives imported; full source coverage and gaps are not yet independently verified",
+                        inserted = store.save_archive_batch(
+                            url, records, cursor=cursor, status="partial",
+                            detail="Official monthly/daily archives imported with per-archive record provenance; full source coverage and gaps are not yet independently verified",
                         )
                         store.update_archive_manifest(
                             url, status="imported", imported_at=datetime.now(timezone.utc).isoformat(), row_count=len(records), error="",
@@ -842,43 +842,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if not isinstance(by_url[url]["imported_at"], str)
                     or not by_url[url]["imported_at"].strip()
                 ]
-                # A manifest row saying "imported" is not sufficient: compare the
-                # archive's recorded row count with distinct timestamps actually stored
-                # for that exact archive period. Kline archives have one row per open time.
+                # Verify the exact archive-to-record provenance, not just timestamps
+                # that might have originated from REST or another overlapping archive.
                 imported_row_count_mismatches: list[dict[str, object]] = []
                 for url in imported:
                     entry = by_url[url]
-                    period = str(entry["archive_period"])
-                    try:
-                        if re.fullmatch(r"\\d{4}-\\d{2}", period):
-                            period_start = datetime.strptime(period, "%Y-%m").replace(tzinfo=timezone.utc)
-                            next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-                            period_end = next_month
-                        elif re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", period):
-                            period_start = datetime.strptime(period, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                            period_end = period_start + timedelta(days=1)
-                        else:
-                            raise ValueError("unsupported archive period format")
-                        start_ms = int(period_start.timestamp() * 1000)
-                        end_ms = int(period_end.timestamp() * 1000) - 1
-                        stored_count = len(store.record_timestamps(
-                            exchange_id="binance", market_type=market_type,
-                            data_type=data_type, symbol=args.symbol,
-                            start_ms=start_ms, end_ms=end_ms,
-                        ))
-                        manifest_count = entry["row_count"]
-                        if not isinstance(manifest_count, int) or manifest_count < 0 or stored_count != manifest_count:
-                            imported_row_count_mismatches.append({
-                                "archive_url": url,
-                                "archive_period": period,
-                                "manifest_row_count": manifest_count,
-                                "stored_distinct_timestamp_count": stored_count,
-                            })
-                    except (ValueError, OverflowError, OSError) as exc:
+                    provenance = store.archive_provenance_summary(url)
+                    manifest_count = entry["row_count"]
+                    if (
+                        not isinstance(manifest_count, int)
+                        or manifest_count <= 0
+                        or provenance["provenance_rows"] != manifest_count
+                        or provenance["stored_record_rows"] != manifest_count
+                    ):
                         imported_row_count_mismatches.append({
                             "archive_url": url,
-                            "archive_period": period,
-                            "error": str(exc),
+                            "archive_period": entry["archive_period"],
+                            "manifest_row_count": manifest_count,
+                            "archive_provenance_rows": provenance["provenance_rows"],
+                            "stored_record_rows_with_provenance": provenance["stored_record_rows"],
                         })
                 manifest_not_listed = [
                     str(entry["archive_url"]) for entry in scoped_manifest
