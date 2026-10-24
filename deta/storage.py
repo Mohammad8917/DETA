@@ -363,6 +363,10 @@ class SQLiteStore:
         allowed = {"discovered", "downloaded", "verified", "imported", "failed", "missing", "unavailable"}
         if status not in allowed:
             raise ValueError(f"Unsupported archive manifest status: {status}")
+        if status == "imported":
+            raise ValueError(
+                "The imported state can only be established atomically by save_archive_batch"
+            )
         if not archive_url.strip() or not symbol.strip() or not archive_period.strip():
             raise ValueError("Archive URL, symbol, and period must be non-empty")
         if size_bytes is not None and size_bytes < 0:
