@@ -57,6 +57,57 @@ jobs:
           python -m deta.cli --db artifacts/live-smoke.sqlite3 backfill-archive-klines \
             --market "$MARKET" --symbols "$SYMBOL" --intervals 1m \
             --start-month "$MONTH" --end-month "$MONTH" 2>&1 | tee artifacts/import.log
+      - name: Reconcile live source listing against persisted manifest
+        env:
+          MARKET: ${{ inputs.market }}
+          SYMBOL: ${{ inputs.symbol }}
+          MONTH: ${{ inputs.month }}
+        run: |
+          set -euo pipefail
+          python -m deta.cli --db artifacts/live-smoke.sqlite3 reconcile-archive-klines \
+            --market "$MARKET" --symbol "$SYMBOL" --interval 1m \
+            --start-month "$MONTH" --end-month "$MONTH" \
+            | tee artifacts/source-manifest-reconciliation.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/source-manifest-reconciliation.json").read_text())
+          problems = {
+              "missing_from_manifest": report["missing_from_manifest"],
+              "verified_but_not_imported": report["verified_but_not_imported"],
+              "failed_archives": report["failed_archives"],
+              "discovered_or_downloaded": report["discovered_or_downloaded"],
+              "missing_checksum_or_size": report["missing_checksum_or_size"],
+              "manifest_entries_not_in_current_source_listing": report[
+                  "manifest_entries_not_in_current_source_listing"
+              ],
+          }
+          problems = {key: value for key, value in problems.items() if value}
+          if report["source_listed_archive_count"] == 0:
+              raise SystemExit("FAIL: no source-listed archive found in requested scope")
+          if len(report["imported_archives"]) != report["source_listed_archive_count"]:
+              problems["source_listed_count_vs_imported_count"] = {
+                  "source_listed": report["source_listed_archive_count"],
+                  "imported": len(report["imported_archives"]),
+              }
+          if problems:
+              print(json.dumps({"result": "FAIL", "problems": problems}, indent=2))
+              raise SystemExit(1)
+          print(json.dumps({
+              "result": "PASS",
+              "source_listed_archive_count": report["source_listed_archive_count"],
+              "imported_archive_count": len(report["imported_archives"]),
+              "scope": {
+                  "market": report["market"],
+                  "symbol": report["symbol"],
+                  "interval": "1m",
+                  "start_month": report["requested_months"]["start"],
+                  "end_month": report["requested_months"]["end"],
+              },
+              "limitation": "Bounded live smoke evidence only; not proof of two-year or all-symbol coverage.",
+          }, indent=2))
+          PY
       - name: Record resulting dataset summary
         if: always()
         run: |
