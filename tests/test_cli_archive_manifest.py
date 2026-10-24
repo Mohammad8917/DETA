@@ -449,3 +449,46 @@ def test_reconcile_archive_klines_reports_stale_manifest_entries_and_daily_fallb
     assert report["source_listed_archive_count"] == 1
     assert report["missing_from_manifest"] == [daily_url]
     assert report["manifest_entries_not_in_current_source_listing"] == [stale_url]
+
+
+
+def test_reconcile_archive_klines_includes_daily_manifest_period_in_month_scope(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    daily_url = (
+        "https://data.binance.vision/data/spot/daily/klines/"
+        "BTCUSDT/1m/BTCUSDT-1m-2024-02-01.zip"
+    )
+
+    class DailyArchive(FakeArchive):
+        def list_monthly_archives(
+            self, symbol: str, interval: str, start_month: str | None = None,
+            end_month: str | None = None,
+        ) -> list[str]:
+            return []
+
+        def list_daily_archives(
+            self, dataset: str, symbol: str, interval: str | None = None,
+            start_month: str | None = None, end_month: str | None = None,
+        ) -> list[str]:
+            return [daily_url]
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", DailyArchive)
+    database = tmp_path / "data.sqlite3"
+    with SQLiteStore(database) as store:
+        store.upsert_archive_manifest(
+            archive_url=daily_url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-02-01",
+            status="imported", checksum_sha256=hashlib.sha256(ARCHIVE_BYTES).hexdigest(),
+            size_bytes=len(ARCHIVE_BYTES), row_count=10, imported_at="2024-02-02T00:00:00+00:00",
+        )
+    result = cli.main([
+        "--db", str(database), "reconcile-archive-klines",
+        "--market", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-month", "2024-02", "--end-month", "2024-02",
+    ])
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["manifest_entries_in_scope"] == 1
+    assert report["imported_archives"] == [daily_url]
+    assert report["manifest_entries_not_in_current_source_listing"] == []
