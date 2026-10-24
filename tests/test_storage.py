@@ -178,3 +178,29 @@ def test_record_timestamps_are_bounded_distinct_and_sorted(tmp_path: Path) -> No
                 exchange_id="binance", market_type="spot", data_type="klines_1m",
                 symbol="BTCUSDT", start_ms=120_000, end_ms=60_000,
             )
+
+def test_checkpoint_resume_after_interruption_uses_last_committed_batch(tmp_path: Path) -> None:
+    """A restart resumes after the last batch committed with its checkpoint."""
+    path = tmp_path / "resume.sqlite3"
+    first_page = [
+        DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "60000", {"close": "1"}),
+        DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 120_000, "120000", {"close": "2"}),
+    ]
+    with SQLiteStore(path) as store:
+        assert store.save_batch(first_page, cursor="120001", status="partial") == 2
+
+    # Simulate process termination: reopen the same durable database.
+    with SQLiteStore(path) as reopened:
+        assert reopened.get_checkpoint("binance", "spot", "klines_1m", "BTCUSDT") == "120001"
+        # Replaying the last record is safe: the primary key prevents duplicates,
+        # and the next checkpoint is committed atomically with the replayed batch.
+        replay = [first_page[-1], DataRecord(
+            "binance", "spot", "klines_1m", "BTCUSDT", 180_000, "180000", {"close": "3"}
+        )]
+        assert reopened.save_batch(replay, cursor="180001", status="partial") == 1
+        assert reopened.get_checkpoint("binance", "spot", "klines_1m", "BTCUSDT") == "180001"
+        summary = next(
+            item for item in reopened.dataset_summary()
+            if item["symbol"] == "BTCUSDT" and item["data_type"] == "klines_1m"
+        )
+        assert summary["rows"] == 3
