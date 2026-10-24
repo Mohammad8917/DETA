@@ -94,6 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--market-type", choices=("spot", "usd_m", "coin_m"))
     manifest.add_argument("--data-type", help="Optional exact dataset type filter")
     manifest.add_argument("--symbol", help="Optional exact symbol/contract filter")
+    reconcile = commands.add_parser(
+        "reconcile-archive-klines",
+        help="Compare source-listed Binance kline archives with the local verification manifest for one bounded dataset",
+    )
+    reconcile.add_argument("--market", choices=("spot", "usd-m", "coin-m"), required=True)
+    reconcile.add_argument("--symbol", required=True, help="One symbol/contract")
+    reconcile.add_argument("--interval", required=True, choices=BinanceArchiveAdapter.candle_intervals)
+    reconcile.add_argument("--start-month", required=True, help="Inclusive YYYY-MM")
+    reconcile.add_argument("--end-month", required=True, help="Inclusive YYYY-MM")
     commands.add_parser("status", help="Show locally stored dataset coverage/status")
     return parser
 
@@ -727,6 +736,68 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "coverage_claim": "Manifest state is audit evidence, not proof of exhaustive source coverage.",
             }, indent=2, ensure_ascii=False))
             return 0
+        if args.command == "reconcile-archive-klines":
+            archive = BinanceArchiveAdapter(args.market)
+            try:
+                monthly = archive.list_monthly_archives(
+                    args.symbol, args.interval, args.start_month, args.end_month
+                )
+                daily = archive.list_daily_archives(
+                    "klines", args.symbol, args.interval, args.start_month, args.end_month
+                )
+                monthly_periods = {_archive_month(url) for url in monthly}
+                source_urls = sorted(set(monthly + [
+                    url for url in daily if _archive_month(url) not in monthly_periods
+                ]))
+                market_type = archive.market_type
+                data_type = f"klines_{args.interval}"
+                manifest = store.archive_manifest_summary(
+                    exchange_id="binance", market_type=market_type,
+                    data_type=data_type, symbol=args.symbol,
+                )
+                by_url = {str(entry["archive_url"]): entry for entry in manifest}
+                listed = set(source_urls)
+                scoped_manifest = [entry for entry in manifest
+                                   if str(entry["archive_period"]) >= args.start_month
+                                   and str(entry["archive_period"]) <= args.end_month]
+                missing_manifest = [url for url in source_urls if url not in by_url]
+                scoped_by_url = {str(entry["archive_url"]): entry for entry in scoped_manifest}
+                verified_not_imported = [url for url in source_urls
+                    if url in by_url and by_url[url]["status"] == "verified"]
+                failed = [url for url in source_urls
+                    if url in by_url and by_url[url]["status"] == "failed"]
+                imported = [url for url in source_urls
+                    if url in by_url and by_url[url]["status"] == "imported"]
+                discovered_or_downloaded = [url for url in source_urls
+                    if url in by_url and by_url[url]["status"] in {"discovered", "downloaded"}]
+                missing_checksum = [url for url in source_urls
+                    if url in by_url and (not by_url[url]["checksum_sha256"]
+                        or by_url[url]["size_bytes"] is None)]
+                print(json.dumps({
+                    "exchange": "binance", "market": args.market,
+                    "market_type": market_type, "symbol": args.symbol,
+                    "data_type": data_type,
+                    "requested_months": {"start": args.start_month, "end": args.end_month},
+                    "source_listed_archive_count": len(source_urls),
+                    "manifest_entries_in_scope": len(scoped_manifest),
+                    "missing_from_manifest": missing_manifest,
+                    "verified_but_not_imported": verified_not_imported,
+                    "failed_archives": failed,
+                    "imported_archives": imported,
+                    "discovered_or_downloaded": discovered_or_downloaded,
+                    "missing_checksum_or_size": missing_checksum,
+                    "manifest_entries_not_in_current_source_listing": [
+                        str(entry["archive_url"]) for entry in scoped_manifest
+                        if str(entry["archive_url"]) not in listed
+                    ],
+                    "coverage_claim": (
+                        "This reconciles the current official monthly/daily source listing against the local manifest only. "
+                        "It cannot prove that the source listing itself is exhaustive or that imported rows cover every expected timestamp."
+                    ),
+                }, indent=2, ensure_ascii=False))
+                return 0 if source_urls else 1
+            finally:
+                archive.close()
         if args.command == "backfill-archive-klines":
             return _backfill_archive_klines(
                 store, args.market, args.symbols, args.intervals, args.start_month, args.end_month
