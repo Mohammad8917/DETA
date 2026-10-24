@@ -5,6 +5,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from deta.domain import DataRecord
 from deta.storage import SQLiteStore
 import deta.cli as cli
