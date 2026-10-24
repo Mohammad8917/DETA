@@ -184,12 +184,17 @@ def test_reconciliation_fails_when_manifest_has_unlisted_archive(
                 data_type="klines_1m",
                 symbol="BTCUSDT",
                 archive_period="2024-01",
-                status="imported",
+                status="discovered",
                 checksum_sha256="c" * 64,
                 size_bytes=1234,
                 row_count=10,
                 imported_at="2026-10-24T00:00:00+00:00",
-            )
+        )
+        # Deliberately corrupt persisted state to test fail-closed reconciliation.
+        store._connection.execute(
+            "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
+            (ARCHIVE_URL,),
+        )
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
 
     exit_code = cli.main(_args(db_path))
@@ -232,9 +237,14 @@ def test_reconciliation_fails_when_imported_manifest_lacks_checksum_or_size(
             data_type="klines_1m",
             symbol="BTCUSDT",
             archive_period="2024-01",
-            status="imported",
+            status="discovered",
             imported_at="2026-10-24T00:00:00+00:00",
             row_count=10,
+        )
+        # Deliberately corrupt persisted state to test fail-closed reconciliation.
+        store._connection.execute(
+            "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
+            (ARCHIVE_URL,),
         )
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
 
@@ -257,10 +267,15 @@ def test_reconciliation_fails_when_imported_archive_has_no_import_timestamp(
             data_type="klines_1m",
             symbol="BTCUSDT",
             archive_period="2024-01",
-            status="imported",
+            status="discovered",
             checksum_sha256="d" * 64,
             size_bytes=1234,
             row_count=10,
+        )
+        # Deliberately corrupt persisted state to test fail-closed reconciliation.
+        store._connection.execute(
+            "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
+            (ARCHIVE_URL,),
         )
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
 
@@ -283,11 +298,16 @@ def test_reconciliation_rejects_zero_byte_archive_metadata(
             data_type="klines_1m",
             symbol="BTCUSDT",
             archive_period="2024-01",
-            status="imported",
+            status="discovered",
             checksum_sha256="e" * 64,
             size_bytes=0,
             row_count=10,
             imported_at="2026-10-24T00:00:00+00:00",
+        )
+        # Deliberately corrupt persisted state to test fail-closed reconciliation.
+        store._connection.execute(
+            "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
+            (ARCHIVE_URL,),
         )
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
 
