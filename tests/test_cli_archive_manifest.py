@@ -587,6 +587,34 @@ def test_audit_kline_gaps_reports_missing_timestamp_in_bounded_range(
 
 
 
+
+def test_audit_kline_gaps_accepts_consistent_ohlcv_payloads(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "valid-ohlcv.sqlite3"
+    with SQLiteStore(database) as store:
+        store.save_batch([
+            DataRecord(
+                "binance", "spot", "klines_1m", "BTCUSDT", 0, "valid-a",
+                {"open": "1", "high": "2", "low": "0.5", "close": "1.5", "volume": "10"},
+            ),
+            DataRecord(
+                "binance", "spot", "klines_1m", "BTCUSDT", 60_000, "valid-b",
+                {"open": "1.5", "high": "2.5", "low": "1", "close": "2", "volume": "0"},
+            ),
+        ], cursor="60001")
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "60000",
+    ])
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["missing_candle_count"] == 0
+    assert report["duplicate_timestamp_count"] == 0
+    assert report["invalid_candle_payload_count"] == 0
+
+
 def test_audit_kline_gaps_rejects_invalid_ohlcv_payload(
     tmp_path: Path, capsys,
 ) -> None:
