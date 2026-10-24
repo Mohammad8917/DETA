@@ -330,3 +330,36 @@ def test_empty_verified_archive_is_not_marked_imported(
         checkpoint = store.dataset_summary()
         assert checkpoint[0]["status"] == "partial"
         assert "contained no kline rows" in checkpoint[0]["detail"]
+
+
+def test_archive_without_checksum_metadata_is_not_counted_as_verified(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceSpotAdapter", FakeSource)
+
+    class MissingChecksumArchive(FakeArchive):
+        def fetch_kline_archive(self, url: str) -> list[DataRecord]:
+            return [
+                DataRecord(
+                    "binance", "spot", "klines_1m", "BTCUSDT", 1704067200000,
+                    "1704067200000", {"close": "2", "archive_url": url},
+                )
+            ]
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", MissingChecksumArchive)
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        result = cli._backfill_archive_klines(
+            store, "spot", ["BTCUSDT"], ["1m"], "2024-01", "2024-01"
+        )
+        assert result == 1
+        report = json.loads(capsys.readouterr().out)
+        assert report["archives_verified"] == 0
+        assert report["archives_imported"] == 0
+        manifest = store.archive_manifest_summary(
+            exchange_id="binance", market_type="spot", data_type="klines_1m",
+            symbol="BTCUSDT",
+        )
+        assert len(manifest) == 1
+        assert manifest[0]["status"] == "failed"
+        assert "without verified checksum metadata" in manifest[0]["error"]
+        assert manifest[0]["imported_at"] is None
