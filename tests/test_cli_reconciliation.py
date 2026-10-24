@@ -189,12 +189,12 @@ def test_reconciliation_fails_when_manifest_has_unlisted_archive(
                 size_bytes=1234,
                 row_count=10,
                 imported_at="2026-10-24T00:00:00+00:00",
-        )
-        # Deliberately corrupt persisted state to test fail-closed reconciliation.
-        store._connection.execute(
-            "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
-            (ARCHIVE_URL,),
-        )
+            )
+            # Deliberately corrupt each row to test fail-closed reconciliation.
+            store._connection.execute(
+                "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
+                (url,),
+            )
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
 
     exit_code = cli.main(_args(db_path))
