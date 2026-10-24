@@ -279,6 +279,7 @@ def test_reconciliation_fails_when_imported_archive_has_no_import_timestamp(
             "UPDATE archive_manifest SET status='imported' WHERE archive_url=?",
             (ARCHIVE_URL,),
         )
+        store._connection.commit()
     monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
 
     exit_code = cli.main(_args(db_path))
