@@ -760,11 +760,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 by_url = {str(entry["archive_url"]): entry for entry in manifest}
                 listed = set(source_urls)
-                scoped_manifest = [entry for entry in manifest
-                                   if str(entry["archive_period"]) >= args.start_month
-                                   and str(entry["archive_period"]) <= args.end_month]
+                # Manifest periods may represent either a whole month (YYYY-MM) or a
+                # daily archive (YYYY-MM-DD). Compare by month so daily entries are not
+                # accidentally excluded by lexicographic comparison against YYYY-MM bounds.
+                scoped_manifest = [
+                    entry for entry in manifest
+                    if args.start_month <= str(entry["archive_period"])[:7] <= args.end_month
+                ]
                 missing_manifest = [url for url in source_urls if url not in by_url]
-                scoped_by_url = {str(entry["archive_url"]): entry for entry in scoped_manifest}
                 verified_not_imported = [url for url in source_urls
                     if url in by_url and by_url[url]["status"] == "verified"]
                 failed = [url for url in source_urls
