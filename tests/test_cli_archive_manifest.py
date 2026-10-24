@@ -585,6 +585,32 @@ def test_audit_kline_gaps_reports_missing_timestamp_in_bounded_range(
     assert "does not prove source/archive completeness" in report["coverage_claim"]
 
 
+
+def test_audit_kline_gaps_detects_duplicate_timestamps(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "duplicate-timestamps.sqlite3"
+    with SQLiteStore(database) as store:
+        store.save_batch([
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 0, "row-a", {"close": "1"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 0, "row-b", {"close": "2"}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 60_000, "row-c", {"close": "3"}),
+        ], cursor="60001")
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "60000",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["expected_candles"] == 2
+    assert report["stored_timestamp_rows"] == 3
+    assert report["stored_distinct_timestamps"] == 2
+    assert report["duplicate_timestamp_count"] == 1
+    assert report["first_duplicate_timestamps_ms"] == [0]
+    assert report["missing_candle_count"] == 0
+
+
 def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, caplog) -> None:
     result = cli.main([
         "--db", str(tmp_path / "data.sqlite3"), "audit-kline-gaps",
