@@ -30,7 +30,7 @@ class MockClient:
             if isinstance(html, bytes):
                 html = html.decode("utf-8", errors="replace")
             children: set[str] = set()
-            for href in re.findall(r'<a\\s+href=["\\']([^"\\']+)["\\']', str(html), re.I):
+            for href in re.findall(r"""<a\s+href=["']([^"']+)["']""", str(html), re.I):
                 if href in {"../", "./", "/"}:
                     continue
                 name = href.split("?", 1)[0].split("#", 1)[0]
