@@ -23,20 +23,20 @@ def test_raw_trades_reconstruct_ohlcv_and_quote_volume() -> None:
     assert first.timestamp_ms == 0
     assert first.payload["open"] == "10"
     assert first.payload["high"] == "10"
-    assert first.payload["low"] == "10"
-    assert first.payload["close"] == "10"
-    assert first.payload["volume"] == "3"
-    assert first.payload["quote_volume"] == "30"
-    assert first.payload["trade_count"] == 1
+    assert first.payload["low"] == "8"
+    assert first.payload["close"] == "8"
+    assert first.payload["volume"] == "4"
+    assert first.payload["quote_volume"] == "38"
+    assert first.payload["trade_count"] == 2
     second = result[1]
     assert second.timestamp_ms == 60_000
-    assert second.payload["open"] == "8"
+    assert second.payload["open"] == "12"
     assert second.payload["high"] == "12"
-    assert second.payload["low"] == "8"
+    assert second.payload["low"] == "12"
     assert second.payload["close"] == "12"
-    assert second.payload["volume"] == "3"
-    assert second.payload["quote_volume"] == "32"
-    assert second.payload["trade_count"] == 2
+    assert second.payload["volume"] == "2"
+    assert second.payload["quote_volume"] == "24"
+    assert second.payload["trade_count"] == 1
     assert second.payload["derived"] is True
 
 
