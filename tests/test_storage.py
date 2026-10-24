@@ -164,6 +164,33 @@ def test_archive_manifest_checksum_change_invalidates_import_evidence(tmp_path: 
         with pytest.raises(ValueError, match="must be verified"):
             store.update_archive_manifest(url, status="imported", checksum_sha256="c" * 64)
 
+        # Re-importing the newly verified archive version must replace stale row payload,
+        # restore provenance, and atomically transition the manifest to imported.
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256=second_digest, size_bytes=101, row_count=1,
+        )
+        revised = DataRecord(
+            "binance", "spot", "klines_1m", "BTCUSDT",
+            1_704_067_200_000, "1704067200000", {"close": "2"},
+        )
+        assert store.save_archive_batch(url, [revised], cursor="1704067200001") == 0
+        summary = store.archive_provenance_summary(url)
+        assert summary == {
+            "provenance_rows": 1, "stored_record_rows": 1,
+            "timestamp_mismatches": 0, "payload_hash_mismatches": 0,
+        }
+        manifest = store.archive_manifest_summary()[0]
+        assert manifest["status"] == "imported"
+        assert manifest["checksum_sha256"] == second_digest
+        assert manifest["imported_at"]
+        stored = store._connection.execute(
+            """SELECT payload_json FROM records
+               WHERE exchange_id='binance' AND market_type='spot'
+                 AND data_type='klines_1m' AND symbol='BTCUSDT'
+                 AND record_key='1704067200000'"""
+        ).fetchone()
+        assert json.loads(stored[0]) == {"close": "2"}
+
 
 def test_record_timestamps_are_bounded_distinct_and_sorted(tmp_path: Path) -> None:
     with SQLiteStore(tmp_path / "data.sqlite3") as store:
