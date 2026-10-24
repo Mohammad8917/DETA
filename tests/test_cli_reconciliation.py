@@ -130,3 +130,53 @@ def test_reconciliation_fails_when_archive_is_verified_but_not_imported(
     assert report["verified_but_not_imported"] == [ARCHIVE_URL]
     assert exit_code == 1
 
+
+def test_reconciliation_fails_when_manifest_has_unlisted_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "extra.sqlite3"
+    extra_url = ARCHIVE_URL.replace("2024-01.zip", "2024-01-extra.zip")
+    with SQLiteStore(db_path) as store:
+        for url in (ARCHIVE_URL, extra_url):
+            store.upsert_archive_manifest(
+                archive_url=url,
+                exchange_id="binance",
+                market_type="spot",
+                data_type="klines_1m",
+                symbol="BTCUSDT",
+                archive_period="2024-01",
+                status="imported",
+                checksum_sha256="c" * 64,
+                size_bytes=1234,
+                row_count=10,
+                imported_at="2026-10-24T00:00:00+00:00",
+            )
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    exit_code = cli.main(_args(db_path))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["manifest_entries_not_in_current_source_listing"] == [extra_url]
+    assert exit_code == 1
+
+
+def test_reconciliation_fails_when_source_listing_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", FakeArchiveAdapter)
+
+    def no_monthly_archives(self, symbol, interval, start_month, end_month):
+        return []
+
+    def no_daily_archives(self, dataset, symbol, interval, start_month, end_month):
+        return []
+
+    monkeypatch.setattr(FakeArchiveAdapter, "list_monthly_archives", no_monthly_archives)
+    monkeypatch.setattr(FakeArchiveAdapter, "list_daily_archives", no_daily_archives)
+
+    exit_code = cli.main(_args(tmp_path / "empty-source.sqlite3"))
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["source_listed_archive_count"] == 0
+    assert exit_code == 1
+
