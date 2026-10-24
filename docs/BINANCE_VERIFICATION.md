@@ -196,3 +196,12 @@ This hardening improves the integrity of the archive lifecycle. It does **not** 
 - GitHub Actions run [40107328179](https://github.com/Mohammad8917/DETA/actions/runs/40107328179) for commit `850c836c9996ee57e4b727a3e7f13800cb4bf651` reports **97 tests passed**.
 - A first test run exposed that the pagination guard had not landed in the tested file revision; the guard was reapplied against the current file and the full suite then passed. The earlier failed run [40107248462](https://github.com/Mohammad8917/DETA/actions/runs/40107248462) is not counted as passing evidence.
 - This hardens how source listings are interpreted; it still does not constitute a live Binance run or proof of two-year candle coverage.
+
+## Authoritative S3 archive inventory — CI verified (2026-10-24)
+
+- Archive discovery now uses paginated S3 ListObjectsV2 results as the authoritative inventory. HTML directory links are no longer treated as complete evidence and are no longer a required request in the discovery path.
+- S3 listing errors, unexpected XML roots, invalid/missing `IsTruncated`, missing continuation tokens for truncated results, repeated continuation tokens, and inconsistent continuation metadata fail closed instead of returning a potentially partial inventory.
+- Added regression coverage showing that a partial HTML page cannot override the authoritative S3 listing, plus a repeated-continuation-token guard.
+- GitHub Actions run [40108532471](https://github.com/Mohammad8917/DETA/actions/runs/40108532471) for commit `91138cf794e93829ab33d88c40ca44cf8f68ee37` completed successfully: **99 tests passed**.
+- Two intermediate runs failed during this change: one had a test-fixture syntax error and another exposed an outdated call-order assertion. Both were corrected; only the final green run is counted as passing evidence.
+- This removes the specific risk of trusting a partial HTML listing. It does not prove the upstream S3 listing itself is exhaustive in every circumstance, nor does it prove live import success or two-year timestamp coverage. Those still require live source execution and data-level reconciliation.
