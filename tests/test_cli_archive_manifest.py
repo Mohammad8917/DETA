@@ -492,3 +492,36 @@ def test_reconcile_archive_klines_includes_daily_manifest_period_in_month_scope(
     assert report["manifest_entries_in_scope"] == 1
     assert report["imported_archives"] == [daily_url]
     assert report["manifest_entries_not_in_current_source_listing"] == []
+
+
+def test_audit_kline_gaps_reports_missing_timestamp_in_bounded_range(
+    tmp_path: Path, capsys,
+) -> None:
+    database = tmp_path / "data.sqlite3"
+    with SQLiteStore(database) as store:
+        store.save_batch([
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 0, "0", {"open_time": 0}),
+            DataRecord("binance", "spot", "klines_1m", "BTCUSDT", 120_000, "120000", {"open_time": 120_000}),
+        ], cursor="120001")
+    result = cli.main([
+        "--db", str(database), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "0", "--end-ms", "120000",
+    ])
+    assert result == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["expected_candles"] == 3
+    assert report["stored_distinct_timestamps"] == 2
+    assert report["missing_candle_count"] == 1
+    assert report["first_missing_timestamps_ms"] == [60_000]
+    assert "does not prove source/archive completeness" in report["coverage_claim"]
+
+
+def test_audit_kline_gaps_rejects_unaligned_range(tmp_path: Path, capsys) -> None:
+    result = cli.main([
+        "--db", str(tmp_path / "data.sqlite3"), "audit-kline-gaps",
+        "--market-type", "spot", "--symbol", "BTCUSDT", "--interval", "1m",
+        "--start-ms", "1", "--end-ms", "120000",
+    ])
+    assert result == 2
+    assert "align" in capsys.readouterr().err
