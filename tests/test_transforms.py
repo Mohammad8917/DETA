@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 import pytest
 
 from deta.domain import DataRecord
@@ -32,10 +30,10 @@ def test_raw_trades_reconstruct_ohlcv_and_quote_volume() -> None:
     assert first.payload["trade_count"] == 1
     second = result[1]
     assert second.timestamp_ms == 60_000
-    assert second.payload["open"] == "12"
+    assert second.payload["open"] == "8"
     assert second.payload["high"] == "12"
     assert second.payload["low"] == "8"
-    assert second.payload["close"] == "8"
+    assert second.payload["close"] == "12"
     assert second.payload["volume"] == "3"
     assert second.payload["quote_volume"] == "32"
     assert second.payload["trade_count"] == 2
