@@ -298,3 +298,32 @@ def test_archive_manifest_cli_reports_status_counts(
     assert report["status_counts"] == {"discovered": 1}
     assert report["archives"][0]["archive_url"] == ARCHIVE_URL
     assert "not proof" in report["coverage_claim"]
+
+def test_empty_verified_archive_is_not_marked_imported(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "BinanceSpotAdapter", FakeSource)
+
+    class EmptyArchive(FakeArchive):
+        def fetch_kline_archive(self, url: str) -> list[DataRecord]:
+            self.last_verified_checksum_sha256 = hashlib.sha256(ARCHIVE_BYTES).hexdigest()
+            self.last_verified_size_bytes = len(ARCHIVE_BYTES)
+            return []
+
+    monkeypatch.setattr(cli, "BinanceArchiveAdapter", EmptyArchive)
+    with SQLiteStore(tmp_path / "data.sqlite3") as store:
+        result = cli._backfill_archive_klines(
+            store, "spot", ["BTCUSDT"], ["1m"], "2024-01", "2024-01"
+        )
+        assert result == 0
+        manifest = store.archive_manifest_summary(
+            exchange_id="binance", market_type="spot", data_type="klines_1m",
+            symbol="BTCUSDT",
+        )
+        assert len(manifest) == 1
+        assert manifest[0]["status"] == "verified"
+        assert manifest[0]["row_count"] == 0
+        assert manifest[0]["imported_at"] is None
+        checkpoint = store.dataset_summary()
+        assert checkpoint[0]["status"] == "partial"
+        assert "contained no kline rows" in checkpoint[0]["detail"]
