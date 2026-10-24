@@ -781,22 +781,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 start_ms=args.start_ms, end_ms=args.end_ms,
             )
             observed_set = set(observed)
+            timestamp_counts: dict[int, int] = {}
+            for timestamp in observed:
+                timestamp_counts[timestamp] = timestamp_counts.get(timestamp, 0) + 1
+            duplicate_timestamps = sorted(
+                timestamp for timestamp, count in timestamp_counts.items() if count > 1
+            )
             expected = range(args.start_ms, args.end_ms + 1, interval_ms)
             missing = [timestamp for timestamp in expected if timestamp not in observed_set]
-            unexpected = [timestamp for timestamp in observed if (timestamp - args.start_ms) % interval_ms != 0]
+            unexpected = [timestamp for timestamp in observed_set
+                          if (timestamp - args.start_ms) % interval_ms != 0]
             print(json.dumps({
                 "exchange": "binance", "market_type": args.market_type,
                 "symbol": args.symbol, "data_type": data_type,
                 "requested_range_ms": {"start_inclusive": args.start_ms, "end_inclusive": args.end_ms},
                 "interval_ms": interval_ms, "expected_candles": expected_count,
-                "stored_distinct_timestamps": len(observed),
+                "stored_timestamp_rows": len(observed),
+                "stored_distinct_timestamps": len(observed_set),
+                "duplicate_timestamp_count": sum(
+                    count - 1 for count in timestamp_counts.values() if count > 1
+                ),
+                "first_duplicate_timestamps_ms": duplicate_timestamps[:100],
                 "missing_candle_count": len(missing), "first_missing_timestamps_ms": missing[:100],
-                "unexpected_off_grid_timestamps": unexpected[:100],
+                "unexpected_off_grid_timestamps": sorted(unexpected)[:100],
                 "first_stored_timestamp_ms": observed[0] if observed else None,
                 "last_stored_timestamp_ms": observed[-1] if observed else None,
-                "coverage_claim": "This checks timestamp continuity only within the explicit range and stored database. It does not prove source/archive completeness or validate candle payload contents.",
+                "coverage_claim": "This checks timestamp continuity and duplicate timestamps within the explicit range and stored database. It does not prove source/archive completeness or validate candle payload contents.",
             }, indent=2, ensure_ascii=False))
-            return 1 if missing or unexpected else 0
+            return 1 if missing or unexpected or duplicate_timestamps else 0
         if args.command == "archive-manifest":
             entries = store.archive_manifest_summary(
                 exchange_id="binance",
