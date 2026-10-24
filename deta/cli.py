@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     raw_trades.add_argument("--symbols", nargs="*", help="Optional symbols/contracts; otherwise use all locally known")
     raw_trades.add_argument("--start-month", help="Optional inclusive YYYY-MM archive month")
     raw_trades.add_argument("--end-month", help="Optional inclusive YYYY-MM archive month")
+    manifest = commands.add_parser(
+        "archive-manifest", help="Audit persisted official archive verification/import states"
+    )
+    manifest.add_argument("--market-type", choices=("spot", "usd_m", "coin_m"))
+    manifest.add_argument("--data-type", help="Optional exact dataset type filter")
+    manifest.add_argument("--symbol", help="Optional exact symbol/contract filter")
     commands.add_parser("status", help="Show locally stored dataset coverage/status")
     return parser
 
@@ -694,6 +700,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     with SQLiteStore(args.db) as store:
         if args.command == "status":
             print(json.dumps(store.dataset_summary(), indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "archive-manifest":
+            entries = store.archive_manifest_summary(
+                exchange_id="binance",
+                market_type=args.market_type,
+                data_type=args.data_type,
+                symbol=args.symbol,
+            )
+            counts: dict[str, int] = {}
+            for entry in entries:
+                status = str(entry["status"])
+                counts[status] = counts.get(status, 0) + 1
+            print(json.dumps({
+                "exchange": "binance",
+                "filters": {
+                    "market_type": args.market_type,
+                    "data_type": args.data_type,
+                    "symbol": args.symbol,
+                },
+                "archive_count": len(entries),
+                "status_counts": counts,
+                "archives": entries,
+                "coverage_claim": "Manifest state is audit evidence, not proof of exhaustive source coverage.",
+            }, indent=2, ensure_ascii=False))
             return 0
         if args.command == "backfill-archive-klines":
             return _backfill_archive_klines(
