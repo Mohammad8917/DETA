@@ -499,7 +499,7 @@ def _backfill_archive_price_klines(
                         store.upsert_archive_manifest(
                             archive_url=url, exchange_id="binance",
                             market_type=source.market_type, data_type=data_type,
-                            symbol=symbol, archive_period=_archive_month(url),
+                            symbol=symbol, archive_period=_archive_period(url),
                             status="discovered",
                         )
                         records = archive.fetch_price_kline_archive(url, price_type)
@@ -636,7 +636,7 @@ def _backfill_archive_trade_dataset(
                     current_archive_url = url
                     store.upsert_archive_manifest(
                         archive_url=url, exchange_id="binance", market_type=market_type,
-                        data_type=dataset, symbol=symbol, archive_period=_archive_month(url),
+                        data_type=dataset, symbol=symbol, archive_period=_archive_period(url),
                         status="discovered",
                     )
                     records = fetch_archive(url)
