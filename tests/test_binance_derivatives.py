@@ -52,6 +52,14 @@ def test_futures_kline_records_keep_market_identity() -> None:
     adapter.close()
 
 
+
+def test_futures_kline_iterator_excludes_unclosed_candle() -> None:
+    row = [9999999990000, "1", "3", "0.5", "2", "10", 9999999999999, "20", 4, "6", "12", "0"]
+    adapter = BinanceDerivativesAdapter("usd-m", client=MockClient([row]), request_pause=0)
+    assert list(adapter.iter_klines("BTCUSDT", "1m", 0)) == []
+    adapter.close()
+
+
 def test_funding_rate_records_preserve_market_identity_and_source_values() -> None:
     adapter = BinanceDerivativesAdapter(
         "coin-m",
