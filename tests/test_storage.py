@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -542,3 +543,42 @@ def test_archive_manifest_upsert_migrates_legacy_daily_period_to_exact_date(tmp_
             status="discovered",
         )
         assert store.archive_manifest_summary()[0]["archive_period"] == "2024-01-31"
+
+
+
+def test_archive_import_rolls_back_all_state_if_checkpoint_write_fails(tmp_path: Path) -> None:
+    """A failure after record/provenance writes must leave no partial archive import."""
+    url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2024-01.zip"
+    record = DataRecord(
+        "binance", "spot", "klines_1m", "BTCUSDT",
+        1_704_067_200_000, "1704067200000", {"close": "1"},
+    )
+    with SQLiteStore(tmp_path / "atomic-rollback.sqlite3") as store:
+        store.upsert_archive_manifest(
+            archive_url=url, exchange_id="binance", market_type="spot",
+            data_type="klines_1m", symbol="BTCUSDT", archive_period="2024-01",
+        )
+        store.update_archive_manifest(
+            url, status="verified", checksum_sha256="a" * 64, size_bytes=100, row_count=1,
+        )
+        store._connection.execute(
+            """CREATE TRIGGER reject_checkpoint_insert
+               BEFORE INSERT ON checkpoints
+               BEGIN SELECT RAISE(ABORT, 'injected checkpoint write failure'); END"""
+        )
+        store._connection.commit()
+
+        with pytest.raises(sqlite3.IntegrityError, match="injected checkpoint write failure"):
+            store.save_archive_batch(url, [record], cursor="1704067200001")
+
+        # The failed transaction must roll back the record, provenance, checkpoint,
+        # and manifest transition together.
+        assert store.dataset_summary() == []
+        assert store.archive_provenance_summary(url) == {
+            "provenance_rows": 0, "stored_record_rows": 0,
+            "timestamp_mismatches": 0, "payload_hash_mismatches": 0,
+        }
+        manifest = store.archive_manifest_summary()[0]
+        assert manifest["status"] == "verified"
+        assert manifest["imported_at"] is None
+        assert store.get_checkpoint("binance", "spot", "klines_1m", "BTCUSDT") is None
