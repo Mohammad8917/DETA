@@ -306,3 +306,41 @@ def test_archive_period_preserves_daily_date_while_month_helper_groups_it() -> N
     )
     assert cli._archive_period(daily_url) == "2024-01-31"
     assert cli._archive_month(daily_url) == "2024-01"
+
+
+def test_archive_manifest_command_passes_when_imported_provenance_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "manifest-audit-pass.sqlite3"
+    _register_imported_archive(db_path)
+
+    exit_code = cli.main([
+        "--db", str(db_path), "archive-manifest",
+        "--market-type", "spot", "--data-type", "klines_1m", "--symbol", "BTCUSDT",
+    ])
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["audit_passed"] is True
+    assert report["imported_provenance_audit_failures"] == []
+    assert report["archives"][0]["provenance_audit"]["passed"] is True
+    assert exit_code == 0
+
+
+def test_archive_manifest_command_fails_when_imported_provenance_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "manifest-audit-fail.sqlite3"
+    _register_imported_archive(db_path)
+    with SQLiteStore(db_path) as store:
+        store._connection.execute("DELETE FROM records")
+        store._connection.commit()
+
+    exit_code = cli.main([
+        "--db", str(db_path), "archive-manifest",
+        "--market-type", "spot", "--data-type", "klines_1m", "--symbol", "BTCUSDT",
+    ])
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["audit_passed"] is False
+    assert report["imported_provenance_audit_failures"][0]["stored_record_rows"] == 0
+    assert exit_code == 1
