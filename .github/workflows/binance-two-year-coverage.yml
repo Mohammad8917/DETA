@@ -152,7 +152,24 @@ jobs:
           import json
           from pathlib import Path
 
+          import os
+
           report = json.loads(Path("artifacts/reconciliation.json").read_text())
+          expected_scope = {
+              "market": os.environ["MARKET"],
+              "symbol": os.environ["SYMBOL"],
+              "interval": os.environ["INTERVAL"],
+              "requested_months": {
+                  "start": os.environ["START_MONTH"],
+                  "end": os.environ["END_MONTH"],
+              },
+          }
+          actual_scope = {
+              "market": report.get("market"),
+              "symbol": report.get("symbol"),
+              "interval": report.get("interval"),
+              "requested_months": report.get("requested_months"),
+          }
           fields = (
               "missing_from_manifest",
               "verified_but_not_imported",
@@ -165,6 +182,11 @@ jobs:
               "manifest_entries_not_in_current_source_listing",
           )
           problems = {field: report.get(field) for field in fields if report.get(field)}
+          if actual_scope != expected_scope:
+              problems["scope_mismatch"] = {
+                  "expected": expected_scope,
+                  "actual": actual_scope,
+              }
           source_count = report.get("source_listed_archive_count", 0)
           imported_count = len(report.get("imported_archives", []))
           if source_count == 0:
@@ -199,6 +221,7 @@ jobs:
           INTERVAL: ${{ inputs.interval }}
           START_MS: ${{ steps.bounds.outputs.start_ms }}
           END_MS: ${{ steps.bounds.outputs.end_ms }}
+          EXPECTED_CANDLES: ${{ steps.bounds.outputs.expected_candles }}
         run: |
           set -euo pipefail
           python -m deta.cli --db artifacts/two-year.sqlite3 audit-kline-gaps \
@@ -209,8 +232,49 @@ jobs:
           import json
           from pathlib import Path
 
+          import os
+
           report = json.loads(Path("artifacts/candle-audit.json").read_text())
+          expected = {
+              "market_type": os.environ["MARKET_TYPE"],
+              "symbol": os.environ["SYMBOL"],
+              "data_type": f"klines_{os.environ['INTERVAL']}",
+              "interval_ms": {
+                  "1m": 60_000, "5m": 300_000, "15m": 900_000,
+                  "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000,
+              }[os.environ["INTERVAL"]],
+              "expected_candles": int(os.environ["EXPECTED_CANDLES"]),
+              "requested_range_ms": {
+                  "start_inclusive": int(os.environ["START_MS"]),
+                  "end_inclusive": int(os.environ["END_MS"]),
+              },
+          }
+          actual = {key: report.get(key) for key in expected}
+          problems = {}
+          if actual != expected:
+              problems["scope_or_expected_count_mismatch"] = {
+                  "expected": expected, "actual": actual,
+              }
+          zero_required = (
+              "missing_candle_count", "duplicate_timestamp_count",
+              "invalid_candle_payload_count",
+          )
+          for field in zero_required:
+              if report.get(field) != 0:
+                  problems[field] = report.get(field)
+          if report.get("unexpected_off_grid_timestamps") != []:
+              problems["unexpected_off_grid_timestamps"] = report.get("unexpected_off_grid_timestamps")
+          if report.get("stored_timestamp_rows") != expected["expected_candles"]:
+              problems["stored_timestamp_rows"] = report.get("stored_timestamp_rows")
+          if report.get("stored_distinct_timestamps") != expected["expected_candles"]:
+              problems["stored_distinct_timestamps"] = report.get("stored_distinct_timestamps")
+          if report.get("first_stored_timestamp_ms") != expected["requested_range_ms"]["start_inclusive"]:
+              problems["first_stored_timestamp_ms"] = report.get("first_stored_timestamp_ms")
+          if report.get("last_stored_timestamp_ms") != expected["requested_range_ms"]["end_inclusive"]:
+              problems["last_stored_timestamp_ms"] = report.get("last_stored_timestamp_ms")
           print(json.dumps({
+              "scope_check": "PASS" if not problems else "FAIL",
+              "scope_problems": problems,
               "expected_candles": report["expected_candles"],
               "stored_timestamp_rows": report["stored_timestamp_rows"],
               "stored_distinct_timestamps": report["stored_distinct_timestamps"],
@@ -221,6 +285,8 @@ jobs:
               "first_missing_timestamps_ms": report["first_missing_timestamps_ms"],
               "first_invalid_candle_payloads": report["first_invalid_candle_payloads"],
           }, indent=2))
+          if problems:
+              raise SystemExit(1)
           PY
 
       - name: Audit imported archive provenance
@@ -228,6 +294,7 @@ jobs:
         env:
           MARKET: ${{ inputs.market }}
           SYMBOL: ${{ inputs.symbol }}
+          INTERVAL: ${{ inputs.interval }}
         run: |
           set -euo pipefail
           case "$MARKET" in
@@ -242,14 +309,35 @@ jobs:
           import json
           from pathlib import Path
 
+          import os
+
           report = json.loads(Path("artifacts/archive-manifest.json").read_text())
+          expected_filters = {
+              "market_type": os.environ["MARKET"].replace("-", "_"),
+              "data_type": f"klines_{os.environ['INTERVAL']}",
+              "symbol": os.environ["SYMBOL"],
+          }
+          problems = {}
+          if report.get("filters") != expected_filters:
+              problems["filters_mismatch"] = {
+                  "expected": expected_filters, "actual": report.get("filters"),
+              }
+          counts = report.get("status_counts", {})
+          if report.get("archive_count") != sum(counts.values()):
+              problems["archive_status_count_mismatch"] = {
+                  "archive_count": report.get("archive_count"), "status_counts": counts,
+              }
+          if counts.get("imported", 0) != report.get("archive_count"):
+              problems["not_all_archives_imported"] = counts
           print(json.dumps({
+              "scope_check": "PASS" if not problems else "FAIL",
+              "scope_problems": problems,
               "archive_count": report["archive_count"],
               "status_counts": report["status_counts"],
               "audit_passed": report["audit_passed"],
               "imported_provenance_audit_failures": report["imported_provenance_audit_failures"],
           }, indent=2))
-          if not report["audit_passed"]:
+          if problems or not report["audit_passed"]:
               raise SystemExit(1)
           PY
 
